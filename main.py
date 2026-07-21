@@ -21,16 +21,22 @@ def main():
 
     logger.info("")
 
-    logger.info("First Date : %s", history.index[0].date())
-    logger.info("Last Date  : %s", history.index[-1].date())
+    logger.info("First Date : %s", history.first_date.date())
+    logger.info("Last Date  : %s", history.last_date.date())
 
-    logger.info("Rows       : %d", len(history))
-
-    logger.info("")
-
-    logger.info("Latest Close : %.2f", history["Close"].iloc[-1])
+    logger.info("Rows       : %d", history.rows)
 
     logger.info("")
+
+    logger.info(
+        "Latest Close : %.2f",
+        history.latest_close,
+    )
+
+    logger.info(
+        "Latest Volume : %.0f",
+        history.latest_volume,
+    )
 
     logger.info("Done.")
 

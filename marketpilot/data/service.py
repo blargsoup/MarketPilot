@@ -2,8 +2,7 @@
 Market data service.
 """
 
-import pandas as pd
-
+from marketpilot.models import MarketHistory
 from .yahoo_data_provider import YahooDataProvider
 
 
@@ -13,7 +12,6 @@ class MarketDataService:
     """
 
     def __init__(self):
-
         self.provider = YahooDataProvider()
 
     def get_history(
@@ -21,10 +19,15 @@ class MarketDataService:
         symbol: str,
         period: str = "5y",
         interval: str = "1d",
-    ) -> pd.DataFrame:
+    ) -> MarketHistory:
 
-        return self.provider.get_history(
+        df = self.provider.get_history(
             symbol,
             period=period,
             interval=interval,
+        )
+
+        return MarketHistory(
+            symbol=symbol,
+            data=df,
         )
