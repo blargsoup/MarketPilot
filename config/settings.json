@@ -1,0 +1,5 @@
+{
+    "data_provider": "yfinance",
+    "cache_enabled": true,
+    "cache_days": 1
+}
