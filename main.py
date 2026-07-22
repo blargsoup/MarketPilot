@@ -4,6 +4,7 @@ from marketpilot.utils.logger import setup_logger
 from marketpilot.utils.config import Config
 from marketpilot.data import MarketDataService
 from marketpilot.signals import SignalEngine
+from marketpilot.strategies import ARVolStrategy
 
 def main():
 
@@ -35,6 +36,10 @@ def main():
 
     signals = SignalEngine(market)
 
+    strategy = ARVolStrategy()
+
+    result = strategy.evaluate(signals)
+
     logger.info("")
     logger.info("QQQ Summary")
     logger.info("------------------------------")
@@ -65,6 +70,20 @@ def main():
         "SPY vs 200 SMA : %.2f%%",
         signals.spy_distance,
     )
+
+    logger.info("")
+    logger.info("Strategy")
+    logger.info("------------------------------")
+
+    logger.info(
+        "Recommended State : %s",
+        result.state.value,
+    )
+
+    logger.info("")
+
+    for reason in result.reasons:
+        logger.info(reason)
 
     logger.info("Done.")
 
