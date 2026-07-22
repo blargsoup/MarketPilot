@@ -3,7 +3,7 @@ from marketpilot import __version__
 from marketpilot.utils.logger import setup_logger
 from marketpilot.utils.config import Config
 from marketpilot.data import MarketDataService
-
+from marketpilot.signals import SignalEngine
 
 def main():
 
@@ -17,25 +17,53 @@ def main():
 
     data = MarketDataService()
 
-    history = data.get_history("QQQ")
+    symbols = [
+        "QQQ",
+        "SPY",
+        "HYG",
+        "LQD",
+        "TLT",
+        "GLD",
+        "XLU",
+        "XLE",
+    ]
+
+    market = data.get_histories(symbols)
+
+    qqq = market["QQQ"]
+    spy = market["SPY"]
+
+    signals = SignalEngine(market)
 
     logger.info("")
+    logger.info("QQQ Summary")
+    logger.info("------------------------------")
 
-    logger.info("First Date : %s", history.first_date.date())
-    logger.info("Last Date  : %s", history.last_date.date())
-
-    logger.info("Rows       : %d", history.rows)
+    logger.info("First Date : %s", qqq.first_date.date())
+    logger.info("Last Date  : %s", qqq.last_date.date())
+    logger.info("Rows       : %d", qqq.rows)
 
     logger.info("")
+    logger.info("Latest Close : %.2f", qqq.latest_close)
+    logger.info("Latest Volume : %.0f", qqq.latest_volume)
+
+    logger.info("")
+    logger.info("Indicators")
+    logger.info("------------------------------")
 
     logger.info(
-        "Latest Close : %.2f",
-        history.latest_close,
+        "RVol (21d) : %.2f%%",
+        signals.rvol * 100,
     )
 
     logger.info(
-        "Latest Volume : %.0f",
-        history.latest_volume,
+        "VR         : %.2f",
+        signals.vr,
+    )
+
+    logger.info(
+        "SPY vs 200 SMA : %.2f%%",
+        signals.spy_distance,
     )
 
     logger.info("Done.")
