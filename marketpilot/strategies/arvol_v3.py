@@ -1,13 +1,9 @@
 """
 A-RVol Version 3
 
-First implementation.
-
-This version only evaluates the
-TQQQ -> QLD transition.
-
-Additional transitions will be
-added incrementally.
+State machine implementation.
+(Currently implements the
+TQQQ -> QLD transition.)
 """
 
 from .parameters import ARVolParameters
@@ -17,80 +13,126 @@ from .state import PortfolioState
 
 class ARVolStrategy:
 
-    def __init__(
-        self,
-        parameters=None,
-    ):
+    def __init__(self, parameters=None):
 
         self.parameters = (
             parameters
             or ARVolParameters()
         )
 
-    def evaluate(self, signals):
+    def evaluate(
+        self,
+        current_state,
+        signals,
+    ):
 
         reasons = []
 
-        move_to_qld = False
+        #
+        # TQQQ -> QLD
+        #
 
-        # RVol trigger
-        if signals.rvol > self.parameters.rvol_to_qld:
+        if current_state == PortfolioState.TQQQ:
 
-            reasons.append(
-                f"✓ RVol {signals.rvol * 100:.2f}% > "
-                f"{self.parameters.rvol_to_qld * 100:.2f}%"
-            )
+            if signals.rvol_over_qld:
 
-            move_to_qld = True
+                reasons.append("RVol >18%")
 
-        else:
+            if signals.vr_over_qld:
 
-            reasons.append(
-                f"✗ RVol {signals.rvol * 100:.2f}% <= "
-                f"{self.parameters.rvol_to_qld * 100:.2f}%"
-            )
+                reasons.append("VR >1.25")
 
-        # VR trigger
-        if signals.vr > self.parameters.vr_to_qld:
+            if signals.spy_breakdown:
 
-            reasons.append(
-                f"✓ VR {signals.vr:.2f} > "
-                f"{self.parameters.vr_to_qld:.2f}"
-            )
+                reasons.append("SPY < -3%")
 
-            move_to_qld = True
+            if reasons:
 
-        else:
+                return StrategyResult(
+                    current_state,
+                    PortfolioState.QLD,
+                    True,
+                    reasons,
+                )
 
-            reasons.append(
-                f"✗ VR {signals.vr:.2f} <= "
-                f"{self.parameters.vr_to_qld:.2f}"
-            )
+        #
+        # QLD -> Defensive
+        #
 
-        # SPY trigger
-        if signals.spy_distance < self.parameters.spy_to_qld:
+        if current_state == PortfolioState.QLD:
 
-            reasons.append(
-                f"✓ SPY {signals.spy_distance:.2f}% < "
-                f"{self.parameters.spy_to_qld:.2f}%"
-            )
+            if signals.rvol_over_defensive:
 
-            move_to_qld = True
+                reasons.append("RVol >36%")
 
-        else:
+            if signals.vr_over_defensive:
 
-            reasons.append(
-                f"✗ SPY {signals.spy_distance:.2f}% >= "
-                f"{self.parameters.spy_to_qld:.2f}%"
-            )
+                reasons.append("VR >1.40")
 
-        state = (
-            PortfolioState.QLD
-            if move_to_qld
-            else PortfolioState.TQQQ
-        )
+            if signals.spy_breakdown:
+
+                reasons.append("SPY Breakdown")
+
+            if signals.credit_crisis:
+
+                reasons.append("Credit Crisis")
+
+            if signals.donchian_confirmed:
+
+                reasons.append("Donchian")
+
+            if reasons:
+
+                return StrategyResult(
+                    current_state,
+                    PortfolioState.DEFENSIVE,
+                    True,
+                    reasons,
+                )
+
+            #
+            # Recovery to TQQQ
+            #
+
+            if (
+                signals.rvol_clear
+                and signals.vr_clear
+                and signals.spy_clear
+            ):
+
+                return StrategyResult(
+                    current_state,
+                    PortfolioState.TQQQ,
+                    True,
+                    [
+                        "All Clear",
+                    ],
+                )
+
+        #
+        # Defensive -> QLD
+        #
+
+        if current_state == PortfolioState.DEFENSIVE:
+
+            if (
+                signals.rvol_defensive_clear
+                and signals.vr_defensive_clear
+                and signals.spy_recovery
+            ):
+
+                return StrategyResult(
+                    current_state,
+                    PortfolioState.QLD,
+                    True,
+                    [
+                        "Danger Passed",
+                    ],
+                )
 
         return StrategyResult(
-            state=state,
-            reasons=reasons,
+            current_state,
+            current_state,
+            False,
+            [],
         )
