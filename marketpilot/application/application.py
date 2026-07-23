@@ -17,12 +17,14 @@ from marketpilot.defensive import (
 )
 from marketpilot.reports import ConsoleReport
 from marketpilot.models import AnalysisResult
+from marketpilot.backtest import BacktestEngine
 
 class Application:
 
     def __init__(self):
 
         self.logger = setup_logger()
+        self.backtester = BacktestEngine()
 
         Config()
 
@@ -49,6 +51,26 @@ class Application:
         ]
 
         market = self.data.get_histories(symbols)
+
+        contexts = self.backtester.run(
+            market,
+        )
+
+        logger.info("")
+        logger.info(
+            "Backtest Timeline : %d trading days",
+            len(contexts),
+        )
+
+        logger.info(
+            "First Simulation : %s",
+            contexts[0].current_date.date(),
+        )
+
+        logger.info(
+            "Last Simulation  : %s",
+            contexts[-1].current_date.date(),
+        )
 
         signals = SignalEngine(market)
 
