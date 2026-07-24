@@ -4,22 +4,6 @@ Simple portfolio simulator.
 
 from .equity_curve import EquityPoint
 
-from marketpilot.strategies import (
-    PortfolioState,
-)
-
-
-ETF_MAP = {
-
-    PortfolioState.TQQQ: "QQQ",
-
-    PortfolioState.QLD: "QQQ",
-
-    PortfolioState.DEFENSIVE: "TLT",
-
-}
-
-
 class EquityCalculator:
 
     def calculate(
@@ -31,37 +15,58 @@ class EquityCalculator:
 
         simulations = backtest.simulations
 
-        equity = starting_value
-
         curve = []
 
-        previous_close = None
+        cash = starting_value
 
-        previous_symbol = None
+        shares = 0.0
+
+        current_symbol = None
 
         for simulation in simulations:
 
             state = simulation.strategy.new_state
 
-            symbol = ETF_MAP[state]
+            symbol = state.asset
 
-            close = (
-                market[symbol]
-                .close
-                .loc[
-                    simulation.context.current_date
-                ]
-            )
+            print(symbol)
+            print(simulation.context.current_date)
+            print(market[symbol].close.index[0])
+            print(market[symbol].close.index[-1])
 
-            if previous_close is not None:
+            close = market[symbol].close.loc[
+                simulation.context.current_date
+            ]
 
-                daily_return = (
-                    close / previous_close
-                ) - 1.0
+            #
+            # First day
+            #
 
-                equity *= (
-                    1.0 + daily_return
-                )
+            if shares == 0:
+
+                shares = cash / close
+
+                cash = 0.0
+
+                current_symbol = symbol
+
+            #
+            # Switched ETFs
+            #
+
+            elif symbol != current_symbol:
+
+                equity = shares * previous_close
+
+                shares = equity / close
+
+                current_symbol = symbol
+
+            #
+            # Current portfolio value
+            #
+
+            equity = shares * close
 
             curve.append(
 
@@ -78,6 +83,3 @@ class EquityCalculator:
             )
 
             previous_close = close
-            previous_symbol = symbol
-
-        return curve
