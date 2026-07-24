@@ -2,18 +2,21 @@
 A-RVol Version 3
 
 State machine implementation.
-(Currently implements the
-TQQQ -> QLD transition.)
 """
+
+from .base import Strategy
 
 from .parameters import ARVolParameters
 from .result import StrategyResult
 from .state import PortfolioState
 
 
-class ARVolStrategy:
+class ARVolStrategy(Strategy):
 
-    def __init__(self, parameters=None):
+    def __init__(
+        self,
+        parameters=None,
+    ):
 
         self.parameters = (
             parameters

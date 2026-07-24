@@ -18,6 +18,8 @@ from marketpilot.defensive import (
 from marketpilot.reports import ConsoleReport
 from marketpilot.models import AnalysisResult
 from marketpilot.backtest import BacktestEngine
+from marketpilot.backtest import EquityCalculator
+from marketpilot.data import MARKET_UNIVERSE
 
 class Application:
 
@@ -40,39 +42,74 @@ class Application:
         logger = self.logger
 
         symbols = [
-            "QQQ",
-            "SPY",
-            "HYG",
-            "LQD",
-            "TLT",
-            "GLD",
-            "XLU",
-            "XLE",
+
+            asset.symbol
+
+            for asset in MARKET_UNIVERSE
+
         ]
 
         market = self.data.get_histories(symbols)
 
-        contexts = self.backtester.run(
+        backtest = self.backtester.run(
             market,
+            self.strategy,
+        )
+
+        calculator = EquityCalculator()
+
+        backtest.equity_curve = (
+
+            calculator.calculate(
+
+                backtest,
+
+                market,
+
+            )
+
+        )
+
+        latest = backtest.simulations[-1]
+
+        logger.info("")
+        logger.info("Latest Simulation")
+        logger.info("------------------------------")
+
+        logger.info(
+            "State : %s",
+            latest.strategy.new_state.name,
+        )
+
+        logger.info(
+            "RVol : %.2f%%",
+            latest.signals.rvol * 100,
+        )
+
+        logger.info(
+            "VR : %.2f",
+            latest.signals.vr,
         )
 
         logger.info("")
         logger.info(
             "Backtest Timeline : %d trading days",
-            len(contexts),
+            backtest.total_days
         )
 
         logger.info(
             "First Simulation : %s",
-            contexts[0].current_date.date(),
+            backtest.simulations[0].context.current_date,
         )
 
         logger.info(
             "Last Simulation  : %s",
-            contexts[-1].current_date.date(),
+            backtest.simulations[-1].context.current_date,
         )
 
         signals = SignalEngine(market)
+
+
 
         defensive = self.selector.select(
             market,
@@ -88,8 +125,42 @@ class Application:
             signals=signals,
             strategy=result,
             defensive=defensive,
+            backtest=backtest,
         )
 
         self.report.display(
             analysis,
         )
+
+        logger.info(
+            "Trades Executed : %d",
+            backtest.total_trades,
+        )
+
+        if backtest.trades:
+
+            trade = backtest.trades[-1]
+
+            logger.info("")
+            logger.info("Last Trade")
+            logger.info("------------------------------")
+
+            logger.info(
+                "Date : %s",
+                trade.date.date(),
+            )
+
+            logger.info(
+                "From : %s",
+                trade.from_state.name,
+            )
+
+            logger.info(
+                "To   : %s",
+                trade.to_state.name,
+            )
+
+            logger.info(
+                "Reason : %s",
+                ", ".join(trade.reason),
+            )

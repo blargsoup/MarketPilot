@@ -3,6 +3,7 @@ Console reporting.
 """
 
 from marketpilot import __version__
+from marketpilot.data import MARKET_UNIVERSE
 
 
 class ConsoleReport:
@@ -33,6 +34,22 @@ class ConsoleReport:
             __version__,
         )
         logger.info("=========================================")
+
+        logger.info("")
+        logger.info("Market Universe")
+        logger.info("------------------------------")
+
+        for asset in MARKET_UNIVERSE:
+
+            logger.info(
+                "%-7s %-30s %s",
+                asset.symbol,
+                asset.description,
+                f"({asset.category})",
+            )
+
+        logger.info("")
+
 
         #
         # QQQ Summary
@@ -196,6 +213,21 @@ class ConsoleReport:
         logger.info(
             "90 Day Momentum : %.2f%%",
             defensive.momentum90,
+        )
+
+        curve = analysis.backtest.equity_curve
+
+        logger.info("")
+        logger.info("Portfolio")
+        logger.info("------------------------------")
+
+        logger.info(
+            "Starting Value : $100,000"
+        )
+
+        logger.info(
+            "Ending Value   : $%s",
+            format(curve[-1].equity, ",.2f"),
         )
 
         logger.info("Done.")

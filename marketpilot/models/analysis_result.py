@@ -1,9 +1,4 @@
-"""
-Complete analysis result.
-
-Represents one snapshot of the market,
-signals and strategy evaluation.
-"""
+from __future__ import annotations
 
 from dataclasses import dataclass
 
@@ -12,9 +7,8 @@ from dataclasses import dataclass
 class AnalysisResult:
 
     market: dict
+    signals: "SignalEngine"
+    strategy: "StrategyResult"
+    defensive: "DefensiveSelection"
 
-    signals: object
-
-    strategy: object
-
-    defensive: object
+    backtest: object | None = None

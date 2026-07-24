@@ -1,8 +1,9 @@
-from .arvol_v3 import ARVolStrategy
-from .state import PortfolioState
-from .parameters import ARVolParameters
+from .base import Strategy
 
-__all__ = [
-    "ARVolStrategy",
-    "PortfolioState",
-]
+from .arvol_v3 import ARVolStrategy
+
+from .state import PortfolioState
+
+from .result import StrategyResult
+
+from .parameters import ARVolParameters
