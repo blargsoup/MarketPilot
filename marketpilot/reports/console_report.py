@@ -4,9 +4,6 @@ Console reporting.
 
 from marketpilot import __version__
 from marketpilot.data import MARKET_UNIVERSE
-from marketpilot.statistics import Statistics
-
-
 class ConsoleReport:
 
     def __init__(self, logger):
@@ -219,8 +216,6 @@ class ConsoleReport:
             defensive.momentum90,
         )
 
-        curve = analysis.backtest.equity_curve
-
         logger.info("")
         logger.info("Performance")
         logger.info("------------------------------")
@@ -258,6 +253,20 @@ class ConsoleReport:
             "Trades         : %d",
             stats.trades,
         )
+
+        if analysis.backtest.benchmarks:
+            logger.info("")
+            logger.info("Buy & Hold Benchmarks")
+            logger.info("%-8s %12s %10s %10s", "Symbol", "End Value", "CAGR", "Max DD")
+
+            for benchmark in analysis.backtest.benchmarks:
+                logger.info(
+                    "%-8s $%10s %9.2f%% %9.2f%%",
+                    benchmark.symbol,
+                    format(benchmark.ending_value, ",.0f"),
+                    benchmark.annual_return * 100,
+                    benchmark.max_drawdown * 100,
+                )
 
         logger.info("")
 

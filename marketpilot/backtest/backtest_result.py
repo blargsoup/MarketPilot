@@ -15,6 +15,10 @@ class BacktestResult:
 
     trades: list[Trade] = field(default_factory=list)
 
+    equity_curve: list = field(default_factory=list)
+
+    benchmarks: list = field(default_factory=list)
+
     @property
     def total_days(self):
 
@@ -34,5 +38,3 @@ class BacktestResult:
     def last_day(self):
 
         return self.simulations[-1]
-    
-    equity_curve: list | None = None

@@ -20,6 +20,8 @@ from marketpilot.models import AnalysisResult
 from marketpilot.backtest import BacktestEngine
 from marketpilot.data import MARKET_UNIVERSE
 from marketpilot.statistics import Statistics
+from marketpilot.benchmarks import BenchmarkRunner
+from marketpilot.performance import PerformanceAnalyzer
 
 class Application:
 
@@ -54,6 +56,13 @@ class Application:
         backtest = self.backtester.run(
             market,
             self.strategy,
+        )
+
+        benchmark_symbols = ["QQQ", "TQQQ", "SPY", "UPRO", "AVUV"]
+        backtest.benchmarks = BenchmarkRunner().run(
+            market,
+            benchmark_symbols,
+            (point.date for point in backtest.equity_curve),
         )
 
         latest = backtest.simulations[-1]
@@ -104,10 +113,6 @@ class Application:
         result = self.strategy.evaluate(
             PortfolioState.TQQQ,
             signals,
-        )
-
-        from marketpilot.performance import (
-            PerformanceAnalyzer,
         )
 
         statistics = PerformanceAnalyzer().analyze(

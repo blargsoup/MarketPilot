@@ -10,8 +10,6 @@ class SimulationResult:
 
     context: object
 
-    market: dict
-
     signals: object
 
     strategy: object

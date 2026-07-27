@@ -3,12 +3,15 @@ Historical backtesting engine.
 """
 
 from .context import BacktestContext
-from .history_slice import slice_market
 from .simulation_result import SimulationResult
 from .backtest_result import BacktestResult
 
-from marketpilot.market import MarketCalendar
+from marketpilot.market import (
+    MarketCalendar,
+    MarketView,
+)
 from marketpilot.portfolio import Portfolio
+from marketpilot.signals import SignalEngine
 
 
 class BacktestEngine:
@@ -39,20 +42,7 @@ class BacktestEngine:
 
             )
 
-            snapshot = slice_market(
-
-                market,
-
-                date,
-
-            )
-
-            #
-            # Imported here to avoid a circular
-            # dependency during startup.
-            #
-
-            from marketpilot.signals import SignalEngine
+            snapshot = MarketView(market, date)
 
             signals = SignalEngine(
                 snapshot,
@@ -81,8 +71,6 @@ class BacktestEngine:
                 SimulationResult(
 
                     context=context,
-
-                    market=snapshot,
 
                     signals=signals,
 
