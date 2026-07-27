@@ -235,19 +235,30 @@ class ConsoleReport:
             format(stats.ending_value, ",.2f"),
         )
 
+        logger.info("")
+
         logger.info(
-            "Total Return   : %.2f%%",
+            "Total Return : %.2f%%",
             stats.total_return * 100,
         )
 
         logger.info(
-            "CAGR           : %.2f%%",
+            "Annual CAGR : %.2f%%",
             stats.annual_return * 100,
         )
+
+        logger.info(
+            "Max Drawdown : %.2f%%",
+            stats.max_drawdown * 100,
+        )
+
+        logger.info("")
 
         logger.info(
             "Trades         : %d",
             stats.trades,
         )
+
+        logger.info("")
 
         logger.info("Done.")

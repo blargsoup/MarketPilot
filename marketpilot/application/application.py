@@ -106,7 +106,11 @@ class Application:
             signals,
         )
 
-        statistics = Statistics().calculate(
+        from marketpilot.performance import (
+            PerformanceAnalyzer,
+        )
+
+        statistics = PerformanceAnalyzer().analyze(
             backtest
         )
 
