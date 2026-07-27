@@ -1,16 +1,14 @@
 """
-Generic historical backtesting engine.
+Historical backtesting engine.
 """
 
 from .context import BacktestContext
 from .history_slice import slice_market
 from .simulation_result import SimulationResult
 from .backtest_result import BacktestResult
-from .trade import Trade
 
-from marketpilot.strategies import (
-    PortfolioState,
-)
+from marketpilot.market import MarketCalendar
+from marketpilot.portfolio import Portfolio
 
 
 class BacktestEngine:
@@ -21,59 +19,62 @@ class BacktestEngine:
         strategy,
     ) -> BacktestResult:
 
-        current_state = PortfolioState.TQQQ
+        calendar = MarketCalendar.from_market(
+            market,
+        )
 
-        qqq = market["QQQ"]
-
-        dates = qqq.close.index
+        portfolio = Portfolio()
 
         simulations = []
 
-        trades = []
-
-        for index, date in enumerate(dates):
+        for index, date in enumerate(calendar):
 
             context = BacktestContext(
+
                 current_date=date,
+
                 current_index=index,
-                total_days=len(dates),
+
+                total_days=len(calendar),
+
             )
 
-            market_snapshot = slice_market(
+            snapshot = slice_market(
+
                 market,
-                index,
+
+                date,
+
             )
+
+            #
+            # Imported here to avoid a circular
+            # dependency during startup.
+            #
 
             from marketpilot.signals import SignalEngine
 
             signals = SignalEngine(
-                market_snapshot,
+                snapshot,
             )
 
             result = strategy.evaluate(
-                current_state,
+
+                portfolio.current_state,
+
                 signals,
+
             )
 
-            if result.changed:
+            portfolio.update(
 
-                trades.append(
+                date,
 
-                    Trade(
+                snapshot,
 
-                        date=date,
+                result,
 
-                        from_state=current_state,
-
-                        to_state=result.new_state,
-
-                        reason=list(result.reasons),
-
-                    )
-
-                )
-
-                current_state = result.new_state
+            )
 
             simulations.append(
 
@@ -81,7 +82,7 @@ class BacktestEngine:
 
                     context=context,
 
-                    market=market_snapshot,
+                    market=snapshot,
 
                     signals=signals,
 
@@ -92,9 +93,7 @@ class BacktestEngine:
             )
 
         return BacktestResult(
-
             simulations=simulations,
-
-            trades=trades,
-
+            trades=portfolio.trades,
+            equity_curve=portfolio.equity_curve,
         )

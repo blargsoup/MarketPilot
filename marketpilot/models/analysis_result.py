@@ -12,3 +12,4 @@ class AnalysisResult:
     defensive: "DefensiveSelection"
 
     backtest: object | None = None
+    statistics: object | None = None

@@ -29,14 +29,16 @@ class EquityCalculator:
 
             symbol = state.asset
 
-            print(symbol)
-            print(simulation.context.current_date)
-            print(market[symbol].close.index[0])
-            print(market[symbol].close.index[-1])
+            prices = market[symbol].close
 
-            close = market[symbol].close.loc[
-                simulation.context.current_date
+            available = prices.loc[
+                prices.index <= simulation.context.current_date
             ]
+
+            if available.empty:
+                continue
+
+            close = available.iloc[-1]
 
             #
             # First day
@@ -83,3 +85,6 @@ class EquityCalculator:
             )
 
             previous_close = close
+            previous_symbol = symbol
+
+        return curve

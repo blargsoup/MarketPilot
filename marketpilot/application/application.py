@@ -18,8 +18,8 @@ from marketpilot.defensive import (
 from marketpilot.reports import ConsoleReport
 from marketpilot.models import AnalysisResult
 from marketpilot.backtest import BacktestEngine
-from marketpilot.backtest import EquityCalculator
 from marketpilot.data import MARKET_UNIVERSE
+from marketpilot.statistics import Statistics
 
 class Application:
 
@@ -54,20 +54,6 @@ class Application:
         backtest = self.backtester.run(
             market,
             self.strategy,
-        )
-
-        calculator = EquityCalculator()
-
-        backtest.equity_curve = (
-
-            calculator.calculate(
-
-                backtest,
-
-                market,
-
-            )
-
         )
 
         latest = backtest.simulations[-1]
@@ -120,47 +106,19 @@ class Application:
             signals,
         )
 
+        statistics = Statistics().calculate(
+            backtest
+        )
+
         analysis = AnalysisResult(
             market=market,
             signals=signals,
             strategy=result,
             defensive=defensive,
             backtest=backtest,
+            statistics=statistics,
         )
 
         self.report.display(
             analysis,
         )
-
-        logger.info(
-            "Trades Executed : %d",
-            backtest.total_trades,
-        )
-
-        if backtest.trades:
-
-            trade = backtest.trades[-1]
-
-            logger.info("")
-            logger.info("Last Trade")
-            logger.info("------------------------------")
-
-            logger.info(
-                "Date : %s",
-                trade.date.date(),
-            )
-
-            logger.info(
-                "From : %s",
-                trade.from_state.name,
-            )
-
-            logger.info(
-                "To   : %s",
-                trade.to_state.name,
-            )
-
-            logger.info(
-                "Reason : %s",
-                ", ".join(trade.reason),
-            )

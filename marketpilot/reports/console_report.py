@@ -4,6 +4,7 @@ Console reporting.
 
 from marketpilot import __version__
 from marketpilot.data import MARKET_UNIVERSE
+from marketpilot.statistics import Statistics
 
 
 class ConsoleReport:
@@ -16,6 +17,9 @@ class ConsoleReport:
         self,
         analysis,
     ):
+
+        stats = analysis.statistics
+
         market = analysis.market
 
         signals = analysis.signals
@@ -218,16 +222,32 @@ class ConsoleReport:
         curve = analysis.backtest.equity_curve
 
         logger.info("")
-        logger.info("Portfolio")
+        logger.info("Performance")
         logger.info("------------------------------")
 
         logger.info(
-            "Starting Value : $100,000"
+            "Starting Value : $%s",
+            format(stats.starting_value, ",.2f"),
         )
 
         logger.info(
             "Ending Value   : $%s",
-            format(curve[-1].equity, ",.2f"),
+            format(stats.ending_value, ",.2f"),
+        )
+
+        logger.info(
+            "Total Return   : %.2f%%",
+            stats.total_return * 100,
+        )
+
+        logger.info(
+            "CAGR           : %.2f%%",
+            stats.annual_return * 100,
+        )
+
+        logger.info(
+            "Trades         : %d",
+            stats.trades,
         )
 
         logger.info("Done.")
