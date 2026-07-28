@@ -20,11 +20,12 @@ class Portfolio:
     def __init__(
         self,
         starting_value=100000.0,
+        initial_state=PortfolioState.TQQQ,
     ):
 
         self.equity = starting_value
 
-        self.current_state = PortfolioState.TQQQ
+        self.current_state = initial_state
 
         self.current_symbol = ETF_MAP[
             self.current_state

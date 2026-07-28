@@ -10,6 +10,7 @@ from marketpilot.data import MarketDataService
 from marketpilot.signals import SignalEngine
 from marketpilot.strategies import (
     ARVolStrategy,
+    BuyAndHoldStrategy,
     PortfolioState,
 )
 from marketpilot.defensive import (
@@ -22,6 +23,7 @@ from marketpilot.data import MARKET_UNIVERSE
 from marketpilot.statistics import Statistics
 from marketpilot.benchmarks import BenchmarkRunner
 from marketpilot.performance import PerformanceAnalyzer
+from marketpilot.comparison import StrategyComparisonRunner
 
 class Application:
 
@@ -29,6 +31,7 @@ class Application:
 
         self.logger = setup_logger()
         self.backtester = BacktestEngine()
+        self.comparisons = StrategyComparisonRunner(self.backtester)
 
         Config()
 
@@ -56,6 +59,14 @@ class Application:
         backtest = self.backtester.run(
             market,
             self.strategy,
+        )
+
+        strategy_comparisons = self.comparisons.run(
+            market,
+            [
+                self.strategy,
+                BuyAndHoldStrategy(PortfolioState.TQQQ),
+            ],
         )
 
         benchmark_symbols = ["QQQ", "TQQQ", "SPY", "UPRO", "AVUV"]
@@ -127,6 +138,8 @@ class Application:
             backtest=backtest,
             statistics=statistics,
         )
+
+        analysis.strategy_comparisons = strategy_comparisons
 
         self.report.display(
             analysis,

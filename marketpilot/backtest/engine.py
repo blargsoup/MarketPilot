@@ -26,7 +26,7 @@ class BacktestEngine:
             market,
         )
 
-        portfolio = Portfolio()
+        portfolio = Portfolio(initial_state=strategy.initial_state)
 
         simulations = []
 

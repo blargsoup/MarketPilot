@@ -268,6 +268,27 @@ class ConsoleReport:
                     benchmark.max_drawdown * 100,
                 )
 
+        if hasattr(analysis, "strategy_comparisons"):
+            logger.info("")
+            logger.info("Strategy Comparison")
+            logger.info(
+                "%-20s %10s %10s %10s",
+                "Strategy",
+                "End Value",
+                "CAGR",
+                "Max DD",
+            )
+
+            for comparison in analysis.strategy_comparisons:
+                comparison_stats = comparison.statistics
+                logger.info(
+                    "%-20s $%8s %9.2f%% %9.2f%%",
+                    comparison.name,
+                    format(comparison_stats.ending_value, ",.0f"),
+                    comparison_stats.annual_return * 100,
+                    comparison_stats.max_drawdown * 100,
+                )
+
         logger.info("")
 
         logger.info("Done.")

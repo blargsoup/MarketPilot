@@ -13,6 +13,9 @@ from .state import PortfolioState
 
 class ARVolStrategy(Strategy):
 
+    name = "A-RVol v3"
+    initial_state = PortfolioState.TQQQ
+
     def __init__(
         self,
         parameters=None,
