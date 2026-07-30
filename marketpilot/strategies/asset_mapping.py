@@ -1,19 +1,18 @@
 """
-Maps portfolio states to ETFs.
-
-Different strategies may eventually
-provide different mappings.
+Maps portfolio states to ETFs for a given strategy profile.
 """
 
 from .state import PortfolioState
 
 
-ETF_MAP = {
+def asset_for_state(
+    profile,
+    state,
+):
+    if state == PortfolioState.AGGRESSIVE:
+        return profile.aggressive_asset
 
-    PortfolioState.TQQQ: "TQQQ",
+    if state == PortfolioState.MODERATE:
+        return profile.moderate_asset
 
-    PortfolioState.QLD: "QLD",
-
-    PortfolioState.DEFENSIVE: "TLT",
-
-}
+    raise ValueError(f"No asset mapping for {state}")

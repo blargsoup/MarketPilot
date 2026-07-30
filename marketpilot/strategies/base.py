@@ -10,8 +10,8 @@ from .state import PortfolioState
 class Strategy(ABC):
 
     name = "Unnamed Strategy"
-    initial_state = PortfolioState.TQQQ
-
+    initial_state = PortfolioState.AGGRESSIVE
+    
     @abstractmethod
     def evaluate(
         self,

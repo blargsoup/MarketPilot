@@ -8,7 +8,7 @@ from .state import PortfolioState
 class BuyAndHoldStrategy(Strategy):
     """Hold one portfolio state for the full backtest period."""
 
-    def __init__(self, state: PortfolioState = PortfolioState.TQQQ):
+    def __init__(self, state: PortfolioState = PortfolioState.AGGRESSIVE):
         self.initial_state = state
         self.name = f"Buy & Hold {state.asset}"
 

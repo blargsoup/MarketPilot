@@ -64,9 +64,42 @@ class Application:
         strategy_comparisons = self.comparisons.run(
             market,
             [
-                self.strategy,
-                BuyAndHoldStrategy(PortfolioState.TQQQ),
+                #
+                # A-RVol Profiles
+                #
+                ARVolStrategy(
+                    NASDAQ_PROFILE,
+                ),
+
+                ARVolStrategy(
+                    SEMICONDUCTOR_PROFILE,
+                ),
+
+                ARVolStrategy(
+                    SP500_PROFILE,
+                ),
+
+                #
+                # Buy & Hold Benchmarks
+                #
+
+                BuyAndHoldStrategy(
+                    PortfolioState.AGGRESSIVE,
+                    NASDAQ_PROFILE,
+                ),
+
+                BuyAndHoldStrategy(
+                    PortfolioState.AGGRESSIVE,
+                    SEMICONDUCTOR_PROFILE,
+                ),
+
+                BuyAndHoldStrategy(
+                    PortfolioState.AGGRESSIVE,
+                    SP500_PROFILE,
+                ),
+
             ],
+
         )
 
         benchmark_symbols = ["QQQ", "TQQQ", "SPY", "UPRO", "AVUV"]
@@ -113,8 +146,10 @@ class Application:
             backtest.simulations[-1].context.current_date,
         )
 
-        signals = SignalEngine(market)
-
+        signals = SignalEngine(
+            market,
+            self.strategy.profile,
+        )
 
 
         defensive = self.selector.select(

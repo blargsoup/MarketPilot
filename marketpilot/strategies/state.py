@@ -1,28 +1,14 @@
+"""
+Portfolio allocation states.
+"""
+
 from enum import Enum
 
 
 class PortfolioState(Enum):
 
-    TQQQ = (
-        "TQQQ",
-        "TQQQ",
-    )
+    AGGRESSIVE = "Aggressive"
 
-    QLD = (
-        "QLD",
-        "QLD",
-    )
+    MODERATE = "Moderate"
 
-    DEFENSIVE = (
-        "DEFENSIVE",
-        "TLT",
-    )
-
-    def __init__(
-        self,
-        label,
-        asset,
-    ):
-
-        self.label = label
-        self.asset = asset
+    DEFENSIVE = "Defensive"

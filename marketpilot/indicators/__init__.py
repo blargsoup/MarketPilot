@@ -1,17 +1,12 @@
 """
-Technical indicators used by MarketPilot.
+MarketPilot indicator library.
+
+All strategies obtain technical indicators through the
+IndicatorEngine instead of calculating them directly.
 """
 
-from .moving_average import simple_moving_average
-from .realized_volatility import realized_volatility
-from .volatility_ratio import volatility_ratio
-from .credit_stress import credit_stress
-from .donchian import donchian_low
+from .engine import IndicatorEngine
 
 __all__ = [
-    "simple_moving_average",
-    "realized_volatility",
-    "volatility_ratio",
-    "credit_stress",
-    donchian_low,
+    "IndicatorEngine",
 ]

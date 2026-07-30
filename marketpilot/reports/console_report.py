@@ -268,26 +268,93 @@ class ConsoleReport:
                     benchmark.max_drawdown * 100,
                 )
 
-        if hasattr(analysis, "strategy_comparisons"):
-            logger.info("")
-            logger.info("Strategy Comparison")
-            logger.info(
-                "%-20s %10s %10s %10s",
-                "Strategy",
-                "End Value",
-                "CAGR",
-                "Max DD",
-            )
+                ####################################################################
+                # Strategy Comparison
+                ####################################################################
 
-            for comparison in analysis.strategy_comparisons:
-                comparison_stats = comparison.statistics
-                logger.info(
-                    "%-20s $%8s %9.2f%% %9.2f%%",
-                    comparison.name,
-                    format(comparison_stats.ending_value, ",.0f"),
-                    comparison_stats.annual_return * 100,
-                    comparison_stats.max_drawdown * 100,
-                )
+                if hasattr(
+                    analysis,
+                    "strategy_comparisons",
+                ):
+
+                    logger.info("")
+                    logger.info("Strategy Comparison")
+                    logger.info(
+                        "-----------------------------------------------------------------------------------------------"
+                    )
+
+                    logger.info(
+                        "%-28s %14s %10s %12s %9s %8s",
+                        "Strategy",
+                        "Ending Value",
+                        "CAGR",
+                        "Max DD",
+                        "Trades",
+                        "Win %",
+                    )
+
+                    logger.info(
+                        "-----------------------------------------------------------------------------------------------"
+                    )
+
+                    #
+                    # Sort by ending value so the winner appears first.
+                    #
+
+                    comparisons = sorted(
+
+                        analysis.strategy_comparisons,
+
+                        key=lambda c: c.statistics.ending_value,
+
+                        reverse=True,
+
+                    )
+
+                    for comparison in comparisons:
+
+                        stats = comparison.statistics
+
+                        trade_stats = getattr(
+                            comparison.backtest,
+                            "trade_statistics",
+                            None,
+                        )
+
+                        if trade_stats:
+
+                            win_rate = (
+                                trade_stats.win_rate * 100
+                            )
+
+                        else:
+
+                            win_rate = 0
+
+                        logger.info(
+
+                            "%-28s $%13s %9.2f%% %11.2f%% %8d %7.1f%%",
+
+                            comparison.name,
+
+                            format(
+                                stats.ending_value,
+                                ",.0f",
+                            ),
+
+                            stats.annual_return * 100,
+
+                            stats.max_drawdown * 100,
+
+                            stats.trades,
+
+                            win_rate,
+
+                        )
+
+                    logger.info(
+                        "-----------------------------------------------------------------------------------------------"
+                    )
 
         logger.info("")
 
