@@ -11,7 +11,7 @@ TRADING_DAYS = 252
 
 def realized_volatility(
     close: pd.Series,
-    window: int = 21,
+    window: int = 15,
 ) -> pd.Series:
     """
     Annualized realized volatility.

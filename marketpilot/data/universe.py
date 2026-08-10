@@ -21,6 +21,10 @@ class Asset:
 
     leverage: int = 1
 
+    dashboard: bool = False
+
+    dashboard_group: str = ""
+
 
 MARKET_UNIVERSE = [
 
@@ -34,6 +38,8 @@ MARKET_UNIVERSE = [
         "NASDAQ-100 ETF",
         "NASDAQ",
         1,
+        True,
+        "NASDAQ",
     ),
 
     Asset(
@@ -42,6 +48,8 @@ MARKET_UNIVERSE = [
         "NASDAQ-100 2x Leveraged",
         "NASDAQ",
         2,
+        True,
+        "NASDAQ",
     ),
 
     Asset(
@@ -50,6 +58,8 @@ MARKET_UNIVERSE = [
         "NASDAQ-100 3x Leveraged",
         "NASDAQ",
         3,
+        True,
+        "NASDAQ",
     ),
 
     #
@@ -62,6 +72,8 @@ MARKET_UNIVERSE = [
         "S&P 500 ETF",
         "S&P500",
         1,
+        True,
+        "S&P 500",
     ),
 
     Asset(
@@ -70,6 +82,8 @@ MARKET_UNIVERSE = [
         "S&P 500 2x Leveraged",
         "S&P500",
         2,
+        True,
+        "S&P 500",
     ),
 
     Asset(
@@ -78,6 +92,8 @@ MARKET_UNIVERSE = [
         "S&P 500 3x Leveraged",
         "S&P500",
         3,
+        True,
+        "S&P 500",
     ),
 
     #
@@ -90,6 +106,8 @@ MARKET_UNIVERSE = [
         "Semiconductor ETF",
         "Technology",
         1,
+        True,
+        "Semiconductors",
     ),
 
     Asset(
@@ -98,6 +116,8 @@ MARKET_UNIVERSE = [
         "Semiconductor 2x Leveraged",
         "Technology",
         2,
+        True,
+        "Semiconductors",
     ),
 
     Asset(
@@ -106,6 +126,8 @@ MARKET_UNIVERSE = [
         "Semiconductor 3x Leveraged",
         "Technology",
         3,
+        True,
+        "Semiconductors",
     ),
 
     #
@@ -118,6 +140,8 @@ MARKET_UNIVERSE = [
         "Class B Shares",
         "Diversified",
         1,
+        True,
+        "Other",
     ),
 
     #
@@ -130,6 +154,8 @@ MARKET_UNIVERSE = [
         "US Small Cap Value",
         "Factor",
         1,
+        True,
+        "Factors",
     ),
 
     #
@@ -142,6 +168,8 @@ MARKET_UNIVERSE = [
         "US Total Market",
         "Broad Market",
         1,
+        True,
+        "Broad Market",
     ),
 
     Asset(
@@ -150,6 +178,8 @@ MARKET_UNIVERSE = [
         "Equal Weight S&P500",
         "Broad Market",
         1,
+        True,
+        "Broad Market",
     ),
 
     #
@@ -162,6 +192,8 @@ MARKET_UNIVERSE = [
         "International Stocks",
         "International",
         1,
+        True,
+        "International",
     ),
 
     Asset(
@@ -170,6 +202,8 @@ MARKET_UNIVERSE = [
         "Developed Markets",
         "International",
         1,
+        True,
+        "International",
     ),
 
     Asset(
@@ -178,6 +212,8 @@ MARKET_UNIVERSE = [
         "Emerging Markets",
         "International",
         1,
+        True,
+        "International",
     ),
 
     #
@@ -238,6 +274,8 @@ MARKET_UNIVERSE = [
         "Physical Gold",
         "Commodity",
         1,
+        True,
+        "Defensive",
     ),
 
     Asset(
@@ -246,6 +284,8 @@ MARKET_UNIVERSE = [
         "Gold Miners",
         "Commodity",
         1,
+        True,
+        "Defensive",
     ),
 
     Asset(
@@ -254,6 +294,8 @@ MARKET_UNIVERSE = [
         "Utilities",
         "Defensive",
         1,
+        True,
+        "Defensive",
     ),
 
     Asset(
@@ -262,6 +304,8 @@ MARKET_UNIVERSE = [
         "Energy",
         "Sector",
         1,
+        True,
+        "Defensive",
     ),
 
     #
@@ -274,5 +318,7 @@ MARKET_UNIVERSE = [
         "Canadian Broad Market",
         "Canada",
         1,
+        True,
+        "Canada",
     ),
 ]

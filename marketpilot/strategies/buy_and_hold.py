@@ -1,27 +1,53 @@
-"""Simple buy-and-hold strategy implementations."""
+"""
+Simple Buy & Hold strategy.
+
+Uses the StrategyProfile so the exact ETF being held is determined
+by the selected market profile.
+"""
 
 from .base import Strategy
+from .profile import NASDAQ_PROFILE
 from .result import StrategyResult
 from .state import PortfolioState
 
 
 class BuyAndHoldStrategy(Strategy):
-    """Hold one portfolio state for the full backtest period."""
+    """
+    Hold the aggressive asset for an entire backtest.
+    """
 
-    def __init__(self, state: PortfolioState = PortfolioState.AGGRESSIVE):
-        self.initial_state = state
-        self.name = f"Buy & Hold {state.asset}"
+    def __init__(
+
+        self,
+
+        profile=NASDAQ_PROFILE,
+
+    ):
+
+        self.profile = profile
+
+        self.initial_state = PortfolioState.AGGRESSIVE
+
+        self.name = f"Buy & Hold ({profile.name})"
 
     def evaluate(
+
         self,
-        current_state: PortfolioState,
+
+        current_state,
+
         signals,
-    ) -> StrategyResult:
-        """Keep the original position regardless of market conditions."""
+
+    ):
 
         return StrategyResult(
+
             current_state=current_state,
+
             new_state=current_state,
+
             changed=False,
+
             reasons=[],
+
         )

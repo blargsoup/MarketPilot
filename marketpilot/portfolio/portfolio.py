@@ -3,19 +3,25 @@ Portfolio simulation.
 
 The portfolio is responsible for tracking portfolio value over time.
 
-The strategy decides WHICH RISK LEVEL to hold.
+Strategy decisions are made using the current day's closing data.
 
-The StrategyProfile determines WHICH ETF represents that risk level.
+A position change generated at EOD is executed for the NEXT trading day.
 
-This separation allows the exact same strategy to run on:
+Therefore:
 
-    NASDAQ
-    Semiconductors
-    S&P500
-    Technology
-    Future custom profiles
+    Day T close
+        ↓
+    Evaluate strategy
+        ↓
+    Generate transition
+        ↓
+    Queue new position
+        ↓
+    Day T+1 close
+        ↓
+    Apply T → T+1 return of the new position
 
-without changing any strategy logic.
+This prevents look-ahead bias.
 """
 
 from __future__ import annotations
@@ -44,42 +50,35 @@ class Portfolio:
         initial_state: PortfolioState = PortfolioState.AGGRESSIVE,
     ):
 
-        #
-        # Strategy profile (NASDAQ, Semiconductor, etc.)
-        #
-
         self.profile = profile
 
         #
-        # Current portfolio value
+        # Current portfolio value.
         #
 
         self.equity = starting_value
 
         #
-        # Current state
+        # Position currently held for the day's return.
         #
 
         self.current_state = initial_state
-
-        #
-        # Actual ETF currently owned.
-        #
-        # This will normally be:
-        #
-        #   Aggressive -> profile.aggressive_asset
-        #   Moderate   -> profile.moderate_asset
-        #   Defensive  -> DefensiveSelector result
-        #
 
         self.current_symbol = profile.asset_for_state(
             initial_state
         )
 
         #
-        # Previous day's closing price.
+        # Position that will become active on the NEXT trading day.
         #
-        # Used to calculate daily return.
+        # A strategy transition generated at today's EOD goes here.
+        #
+
+        self.pending_state = None
+        self.pending_symbol = None
+
+        #
+        # Previous closing price of the currently held position.
         #
 
         self.previous_close = None
@@ -101,19 +100,22 @@ class Portfolio:
     ):
 
         """
-        Change portfolio allocation.
+        Queue a position change for the next trading day.
 
-        If symbol is omitted, use the StrategyProfile mapping.
+        IMPORTANT:
 
-        Defensive positions may override this by supplying the
-        selected defensive ETF.
+        This does NOT immediately change the position used for today's
+        return.
+
+        The strategy is evaluated at today's close, so the resulting
+        position begins earning returns tomorrow.
         """
 
-        self.current_state = new_state
+        self.pending_state = new_state
 
         if symbol is None:
 
-            self.current_symbol = (
+            self.pending_symbol = (
                 self.profile.asset_for_state(
                     new_state
                 )
@@ -121,14 +123,39 @@ class Portfolio:
 
         else:
 
-            self.current_symbol = symbol
+            self.pending_symbol = symbol
+
+    ####################################################################
+    # Activate Pending Position
+    ####################################################################
+
+    def _activate_pending_position(self):
+
+        """
+        Move a queued EOD transition into the active position.
+
+        Called at the START of the next trading day.
+        """
+
+        if self.pending_state is None:
+
+            return
+
+        self.current_state = self.pending_state
+
+        self.current_symbol = self.pending_symbol
 
         #
-        # Force tomorrow's return calculation to begin from
-        # today's closing price.
+        # The first price used for the new position is tomorrow's close.
+        #
+        # There is deliberately no return calculated against today's
+        # closing price here.
         #
 
         self.previous_close = None
+
+        self.pending_state = None
+        self.pending_symbol = None
 
     ####################################################################
     # Daily Update
@@ -142,20 +169,33 @@ class Portfolio:
 
         """
         Update portfolio for one trading day.
+
+        The active position earns today's return.
+
+        Any position queued by yesterday's EOD strategy evaluation
+        becomes active before today's return is calculated.
         """
+
+        #
+        # First activate yesterday's EOD decision.
+        #
+
+        self._activate_pending_position()
+
+        #
+        # Get today's closing price for the position being held today.
+        #
 
         history = market[
             self.current_symbol
         ]
 
-        #
-        # Current closing price.
-        #
-
         close = history.latest_close
 
         #
         # First day holding this asset.
+        #
+        # We establish today's close as the baseline.
         #
 
         if self.previous_close is None:
@@ -174,7 +214,7 @@ class Portfolio:
             self.previous_close = close
 
         #
-        # Record equity curve.
+        # Record today's equity.
         #
 
         self.curve.append(
@@ -209,3 +249,8 @@ class Portfolio:
     def current_asset(self):
 
         return self.current_symbol
+
+    @property
+    def pending_asset(self):
+
+        return self.pending_symbol

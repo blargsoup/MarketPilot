@@ -1,35 +1,12 @@
 """
 Strategy Profiles
 
-A profile defines which ETFs correspond to the three portfolio
-risk levels for a particular strategy.
+A StrategyProfile contains every tunable parameter required by a strategy.
 
-The strategy itself never refers to specific ETF symbols.
-Instead it asks the profile which asset represents:
+Strategies themselves contain no ETF names and no hard-coded thresholds.
 
-    • Aggressive
-    • Moderate
-    • Defensive signal source
-
-Examples
-
-NASDAQ
-
-    Aggressive : TQQQ
-    Moderate   : QLD
-    Signals    : QQQ
-
-Semiconductors
-
-    Aggressive : SOXL
-    Moderate   : USD
-    Signals    : SMH
-
-S&P500
-
-    Aggressive : UPRO
-    Moderate   : SSO
-    Signals    : SPY
+Profiles allow the exact same strategy to operate on NASDAQ,
+Semiconductors, SPY, or any future market.
 """
 
 from dataclasses import dataclass
@@ -40,53 +17,122 @@ from .state import PortfolioState
 @dataclass(frozen=True)
 class StrategyProfile:
 
-    #
-    # Display name
-    #
+    print("Loaded StrategyProfile from:", __file__)
+
+    ####################################################################
+    # Display
+    ####################################################################
 
     name: str
 
-    #
-    # ETF used for indicators
-    #
+    ####################################################################
+    # Market assets
+    ####################################################################
 
     signal_asset: str
 
-    #
-    # ETF used in aggressive mode
-    #
+    trend_asset: str
 
     aggressive_asset: str
-
-    #
-    # ETF used in moderate mode
-    #
 
     moderate_asset: str
 
     ####################################################################
-    # Helpers
+    # Defensive universe
+    ####################################################################
+
+    defensive_assets: tuple[str, ...]
+
+    cash_asset: str
+
+    ####################################################################
+    # Realized Volatility thresholds
+    ####################################################################
+
+    rvol_qld: float = 0.18
+
+    rvol_defensive: float = 0.36
+
+    rvol_recovery: float = 0.14
+
+    rvol_defensive_recovery: float = 0.25
+
+    ####################################################################
+    # Volatility Ratio thresholds
+    ####################################################################
+
+    vr_qld: float = 1.25
+
+    vr_defensive: float = 1.40
+
+    vr_recovery: float = 0.90
+
+    vr_defensive_recovery: float = 1.10
+
+    ####################################################################
+    # Trend thresholds
+    ####################################################################
+
+    spy_breakdown: float = -0.03
+
+    spy_recovery: float = -0.015
+
+    spy_clear: float = 0.03
+
+    ####################################################################
+    # Credit stress
+    ####################################################################
+
+    credit_threshold: float = -0.04
+
+    ####################################################################
+    # Donchian confirmation / recovery
+    ####################################################################
+
+    # Minimum realized volatility required before a Donchian break
+    # becomes a valid defensive exit.
+    donchian_rvol: float = 0.20
+
+    # Require a 3% bounce from the trailing low before allowing
+    # re-entry into QLD.
+    donchian_recovery: float = 0.03
+
+    # Safety valve. If the bounce never comes, allow re-entry after
+    # this many trading days.
+    donchian_timeout: int = 20
+
+    ####################################################################
+    # Defensive asset filter
+    ####################################################################
+
+    defensive_max_extension: float = 0.15
+
+    ####################################################################
+    # Convenience helpers
     ####################################################################
 
     def asset_for_state(
+
         self,
+
         state: PortfolioState,
-    ) -> str:
+
+    ):
 
         if state == PortfolioState.AGGRESSIVE:
+
             return self.aggressive_asset
 
         if state == PortfolioState.MODERATE:
+
             return self.moderate_asset
 
-        raise ValueError(
-            "DEFENSIVE assets are chosen dynamically."
-        )
+        return self.cash_asset
 
 
-########################################################################
-# Built-in Profiles
-########################################################################
+##############################################################################
+# NASDAQ
+##############################################################################
 
 NASDAQ_PROFILE = StrategyProfile(
 
@@ -94,11 +140,29 @@ NASDAQ_PROFILE = StrategyProfile(
 
     signal_asset="QQQ",
 
+    trend_asset="SPY",
+
     aggressive_asset="TQQQ",
 
     moderate_asset="QLD",
 
+    defensive_assets=(
+
+        "TLT",
+        "GLD",
+        "XLU",
+        "XLE",
+
+    ),
+
+    cash_asset="SGOV",
+
 )
+
+
+##############################################################################
+# Semiconductors
+##############################################################################
 
 SEMICONDUCTOR_PROFILE = StrategyProfile(
 
@@ -106,11 +170,29 @@ SEMICONDUCTOR_PROFILE = StrategyProfile(
 
     signal_asset="SMH",
 
+    trend_asset="SPY",
+
     aggressive_asset="SOXL",
 
     moderate_asset="USD",
 
+    defensive_assets=(
+
+        "TLT",
+        "GLD",
+        "XLU",
+        "XLE",
+
+    ),
+
+    cash_asset="SGOV",
+
 )
+
+
+##############################################################################
+# S&P 500
+##############################################################################
 
 SP500_PROFILE = StrategyProfile(
 
@@ -118,8 +200,21 @@ SP500_PROFILE = StrategyProfile(
 
     signal_asset="SPY",
 
+    trend_asset="SPY",
+
     aggressive_asset="UPRO",
 
     moderate_asset="SSO",
+
+    defensive_assets=(
+
+        "TLT",
+        "GLD",
+        "XLU",
+        "XLE",
+
+    ),
+
+    cash_asset="SGOV",
 
 )

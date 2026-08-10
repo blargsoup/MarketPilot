@@ -91,7 +91,7 @@ class TradeAnalyzer:
 
                     exit_date=next_trade.date,
 
-                    asset=trade.to_state.asset,
+                    asset=trade.to_symbol,
 
                     entry_value=entry.equity,
 

@@ -17,4 +17,8 @@ class Trade:
 
     to_state: PortfolioState
 
+    from_symbol: str
+
+    to_symbol: str
+
     reason: list[str]

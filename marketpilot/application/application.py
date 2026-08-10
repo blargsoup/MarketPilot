@@ -12,6 +12,9 @@ from marketpilot.strategies import (
     ARVolStrategy,
     BuyAndHoldStrategy,
     PortfolioState,
+    NASDAQ_PROFILE,
+    SEMICONDUCTOR_PROFILE,
+    SP500_PROFILE
 )
 from marketpilot.defensive import (
     DefensiveSelector,
@@ -24,6 +27,17 @@ from marketpilot.statistics import Statistics
 from marketpilot.benchmarks import BenchmarkRunner
 from marketpilot.performance import PerformanceAnalyzer
 from marketpilot.comparison import StrategyComparisonRunner
+from marketpilot.regime import (
+    MarketRegime,
+    DonchianRegime,
+)
+from marketpilot.indicators import IndicatorEngine
+from marketpilot.reports import (
+    ConsoleReport,
+    DashboardReport,
+    TradeReport,
+)
+from marketpilot.diagnostics.strategy_report import StrategyReport
 
 class Application:
 
@@ -42,7 +56,11 @@ class Application:
             self.logger,
         )
 
-    def run(self):
+    def run(
+        self,
+        refresh: bool = False,
+        backtest: bool = False,
+    ):
 
         logger = self.logger
 
@@ -54,9 +72,85 @@ class Application:
 
         ]
 
-        market = self.data.get_histories(symbols)
+        market = self.data.get_histories(
+            symbols,
+            refresh=refresh,
+        )
 
-        backtest = self.backtester.run(
+        #
+        # Daily mode
+        #
+
+        if not backtest:
+
+            #
+            # Calculate today's signals only.
+            #
+
+            indicators = IndicatorEngine(
+
+                market,
+
+                self.strategy.profile,
+
+            )
+
+            #
+            # Live regime state
+            #
+
+            regime = MarketRegime()
+
+            donchian_regime = DonchianRegime()
+
+            signals = SignalEngine(
+                market,
+                self.strategy.profile,
+                regime,
+                donchian_regime,
+            )
+
+            strategy = self.strategy.evaluate(
+
+                PortfolioState.MODERATE,
+
+                signals,
+
+            )
+
+            defensive = self.selector.select(
+
+                indicators,
+
+                self.strategy.profile,
+
+            )
+
+            DashboardReport(
+                self.strategy.profile,
+            ).display(
+
+                logger,
+
+                market,
+
+                signals,
+
+                strategy,
+
+                defensive,
+
+                self.strategy.profile,
+
+            )
+
+            return
+
+        #
+        # Full backtest only when requested.
+        #
+
+        backtest_result = self.backtester.run(
             market,
             self.strategy,
         )
@@ -83,33 +177,24 @@ class Application:
                 # Buy & Hold Benchmarks
                 #
 
-                BuyAndHoldStrategy(
-                    PortfolioState.AGGRESSIVE,
-                    NASDAQ_PROFILE,
-                ),
+                BuyAndHoldStrategy(NASDAQ_PROFILE),
 
-                BuyAndHoldStrategy(
-                    PortfolioState.AGGRESSIVE,
-                    SEMICONDUCTOR_PROFILE,
-                ),
+                BuyAndHoldStrategy(SEMICONDUCTOR_PROFILE),
 
-                BuyAndHoldStrategy(
-                    PortfolioState.AGGRESSIVE,
-                    SP500_PROFILE,
-                ),
+                BuyAndHoldStrategy(SP500_PROFILE),
 
             ],
 
         )
 
         benchmark_symbols = ["QQQ", "TQQQ", "SPY", "UPRO", "AVUV"]
-        backtest.benchmarks = BenchmarkRunner().run(
+        backtest_result.benchmarks = BenchmarkRunner().run(
             market,
             benchmark_symbols,
-            (point.date for point in backtest.equity_curve),
+            (point.date for point in backtest_result.equity_curve),
         )
 
-        latest = backtest.simulations[-1]
+        latest = backtest_result.simulations[-1]
 
         logger.info("")
         logger.info("Latest Simulation")
@@ -133,36 +218,41 @@ class Application:
         logger.info("")
         logger.info(
             "Backtest Timeline : %d trading days",
-            backtest.total_days
+            backtest_result.total_days
         )
 
         logger.info(
             "First Simulation : %s",
-            backtest.simulations[0].context.current_date,
+            backtest_result.simulations[0].context.current_date,
         )
 
         logger.info(
             "Last Simulation  : %s",
-            backtest.simulations[-1].context.current_date,
+            backtest_result.simulations[-1].context.current_date,
         )
 
-        signals = SignalEngine(
+        signals = latest.signals
+
+        indicators = IndicatorEngine(
+
             market,
-            self.strategy.profile,
-        )
 
+            self.strategy.profile,
+
+        )
 
         defensive = self.selector.select(
-            market,
+
+            indicators,
+
+            self.strategy.profile,
+
         )
 
-        result = self.strategy.evaluate(
-            PortfolioState.TQQQ,
-            signals,
-        )
+        result = latest.strategy
 
         statistics = PerformanceAnalyzer().analyze(
-            backtest
+            backtest_result
         )
 
         analysis = AnalysisResult(
@@ -170,7 +260,7 @@ class Application:
             signals=signals,
             strategy=result,
             defensive=defensive,
-            backtest=backtest,
+            backtest=backtest_result,
             statistics=statistics,
         )
 
@@ -178,4 +268,20 @@ class Application:
 
         self.report.display(
             analysis,
+        )
+
+        TradeReport().display(
+
+            logger,
+
+            backtest_result,
+
+        )
+
+        StrategyReport().display(
+
+            logger,
+
+            backtest_result.diagnostics,
+
         )

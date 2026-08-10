@@ -96,23 +96,23 @@ class ConsoleReport:
         logger.info("------------------------------")
 
         logger.info(
-            "RVol (21d) : %.2f%%",
+            "RVol (15d)      : %.2f%%",
             signals.rvol * 100,
         )
 
         logger.info(
-            "VR         : %.2f",
+            "VR              : %.2f",
             signals.vr,
         )
 
         logger.info(
-            "SPY vs 200 SMA : %.2f%%",
-            signals.spy_distance,
+            "SPY vs 200 SMA  : %.2f%%",
+            signals.spy_distance * 100,
         )
 
         logger.info(
-            "Credit (20d): %.2f%%",
-            signals.credit,
+            "Credit (20d)    : %.2f%%",
+            signals.credit * 100,
         )
 
         #
@@ -208,12 +208,12 @@ class ConsoleReport:
 
         logger.info(
             "30 Day Momentum : %.2f%%",
-            defensive.momentum30,
+            defensive.momentum30 * 100,
         )
 
         logger.info(
             "90 Day Momentum : %.2f%%",
-            defensive.momentum90,
+            defensive.momentum90 * 100,
         )
 
         logger.info("")
@@ -268,93 +268,93 @@ class ConsoleReport:
                     benchmark.max_drawdown * 100,
                 )
 
-                ####################################################################
-                # Strategy Comparison
-                ####################################################################
+        ####################################################################
+        # Strategy Comparison
+        ####################################################################
 
-                if hasattr(
-                    analysis,
-                    "strategy_comparisons",
-                ):
+        if hasattr(
+            analysis,
+            "strategy_comparisons",
+        ):
 
-                    logger.info("")
-                    logger.info("Strategy Comparison")
-                    logger.info(
-                        "-----------------------------------------------------------------------------------------------"
+            logger.info("")
+            logger.info("Strategy Comparison")
+            logger.info(
+                "-----------------------------------------------------------------------------------------------"
+            )
+
+            logger.info(
+                "%-28s %14s %10s %12s %9s %8s",
+                "Strategy",
+                "Ending Value",
+                "CAGR",
+                "Max DD",
+                "Trades",
+                "Win %",
+            )
+
+            logger.info(
+                "-----------------------------------------------------------------------------------------------"
+            )
+
+            #
+            # Sort by ending value so the winner appears first.
+            #
+
+            comparisons = sorted(
+
+                analysis.strategy_comparisons,
+
+                key=lambda c: c.statistics.ending_value,
+
+                reverse=True,
+
+            )
+
+            for comparison in comparisons:
+
+                stats = comparison.statistics
+
+                trade_stats = getattr(
+                    comparison.backtest,
+                    "trade_statistics",
+                    None,
+                )
+
+                if trade_stats:
+
+                    win_rate = (
+                        trade_stats.win_rate * 100
                     )
 
-                    logger.info(
-                        "%-28s %14s %10s %12s %9s %8s",
-                        "Strategy",
-                        "Ending Value",
-                        "CAGR",
-                        "Max DD",
-                        "Trades",
-                        "Win %",
-                    )
+                else:
 
-                    logger.info(
-                        "-----------------------------------------------------------------------------------------------"
-                    )
+                    win_rate = 0
 
-                    #
-                    # Sort by ending value so the winner appears first.
-                    #
+                logger.info(
 
-                    comparisons = sorted(
+                    "%-28s $%13s %9.2f%% %11.2f%% %8d %7.1f%%",
 
-                        analysis.strategy_comparisons,
+                    comparison.name,
 
-                        key=lambda c: c.statistics.ending_value,
+                    format(
+                        stats.ending_value,
+                        ",.0f",
+                    ),
 
-                        reverse=True,
+                    stats.annual_return * 100,
 
-                    )
+                    stats.max_drawdown * 100,
 
-                    for comparison in comparisons:
+                    stats.trades,
 
-                        stats = comparison.statistics
+                    win_rate,
 
-                        trade_stats = getattr(
-                            comparison.backtest,
-                            "trade_statistics",
-                            None,
-                        )
+                )
 
-                        if trade_stats:
-
-                            win_rate = (
-                                trade_stats.win_rate * 100
-                            )
-
-                        else:
-
-                            win_rate = 0
-
-                        logger.info(
-
-                            "%-28s $%13s %9.2f%% %11.2f%% %8d %7.1f%%",
-
-                            comparison.name,
-
-                            format(
-                                stats.ending_value,
-                                ",.0f",
-                            ),
-
-                            stats.annual_return * 100,
-
-                            stats.max_drawdown * 100,
-
-                            stats.trades,
-
-                            win_rate,
-
-                        )
-
-                    logger.info(
-                        "-----------------------------------------------------------------------------------------------"
-                    )
+            logger.info(
+                "-----------------------------------------------------------------------------------------------"
+            )
 
         logger.info("")
 

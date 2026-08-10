@@ -8,6 +8,7 @@ from marketpilot.cache import CacheManager
 from marketpilot.models import MarketHistory
 
 from .yahoo_data_provider import YahooDataProvider
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 
 class MarketDataService:
@@ -22,31 +23,91 @@ class MarketDataService:
 
     def get_history(
         self,
-        symbol: str,
-        period: str = "5y",
-        interval: str = "1d",
+        symbol,
+        period="max",
+        interval="1d",
+        refresh=True,
     ) -> MarketHistory:
 
-        # Try cache first
+        #
+        # Existing cache
+        #
+
         if self.cache.exists(symbol):
 
-            print(f"Loading {symbol} from cache...")
+            if not refresh:
 
-            df = self.cache.load(symbol)
+                return MarketHistory(
+                    symbol=symbol,
+                    data=self.cache.load(symbol),
+                )
+
+            print(f"Updating {symbol} cache...")
+
+            cached = self.cache.load(symbol)
+
+            #
+            # Only fetch recent history
+            #
+
+            latest = self.provider.get_history(
+                symbol,
+                period="10d",
+                interval=interval,
+            )
+
+            #
+            # Merge
+            #
+
+            df = (
+                cached.combine_first(latest)
+                .combine_first(cached)
+            )
+
+            #
+            # Overwrite cached rows with Yahoo's newest copy
+            #
+
+            df.update(latest)
+
+            #
+            # Sort
+            #
+
+            df = df.sort_index()
+
+            #
+            # Remove duplicates
+            #
+
+            df = df[
+                ~df.index.duplicated(keep="last")
+            ]
+
+            #
+            # Save refreshed cache
+            #
+
+            self.cache.save(symbol, df)
 
             return MarketHistory(
                 symbol=symbol,
                 data=df,
             )
 
-        # Otherwise download
+        #
+        # First download
+        #
+
+        print(f"Creating cache for {symbol}...")
+
         df = self.provider.get_history(
             symbol,
-            period=period,
+            period="max",
             interval=interval,
         )
 
-        # Save for next time
         self.cache.save(symbol, df)
 
         return MarketHistory(
@@ -57,18 +118,29 @@ class MarketDataService:
     def get_histories(
         self,
         symbols: list[str],
-        period: str = "5y",
+        period: str = "max",
         interval: str = "1d",
+        refresh: bool = True,
     ) -> Dict[str, MarketHistory]:
 
         market = {}
 
-        for symbol in symbols:
+        with ThreadPoolExecutor(max_workers=8) as executor:
 
-            market[symbol] = self.get_history(
-                symbol,
-                period,
-                interval,
-            )
+            futures = {
+                executor.submit(
+                    self.get_history,
+                    symbol,
+                    period,
+                    interval,
+                    refresh,
+                ): symbol
+                for symbol in symbols
+            }
+
+            for future in as_completed(futures):
+
+                symbol = futures[future]
+                market[symbol] = future.result()
 
         return market

@@ -1,6 +1,20 @@
 """
-Relative volatility indicators.
+Volatility indicators.
+
+This module exposes the volatility-related indicators used by
+MarketPilot strategies.
+
+Current indicators:
+
+    • Realized Volatility (annualized)
+    • Volatility Ratio
+
+The underlying calculations are implemented in the individual
+indicator modules.
 """
+
+from .realized_volatility import realized_volatility
+from .volatility_ratio import volatility_ratio
 
 
 class VolatilityIndicators:
@@ -22,19 +36,48 @@ class VolatilityIndicators:
         ]
 
     @property
-    def rvol_21(self):
+    def realized_volatility(self):
+        """
+        Current annualized realized volatility.
+
+        Returns
+        -------
+        float
+
+            Example:
+                0.18 = 18%
+        """
 
         history = self.signal_history.data
 
         return float(
-            history["RVol21"].iloc[-1]
+
+            realized_volatility(
+
+                history["Close"]
+
+            ).iloc[-1]
+
         )
 
     @property
-    def volume_ratio(self):
+    def volatility_ratio(self):
+        """
+        Current Volatility Ratio.
+
+        Returns
+        -------
+        float
+        """
 
         history = self.signal_history.data
 
         return float(
-            history["VR"].iloc[-1]
+
+            volatility_ratio(
+
+                history["Close"]
+
+            ).iloc[-1]
+
         )

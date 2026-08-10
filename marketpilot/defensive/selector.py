@@ -1,5 +1,16 @@
 """
 Defensive asset selection.
+
+Chooses the strongest qualifying defensive asset using
+IndicatorEngine calculations.
+
+Qualification rules
+
+    • Positive 30-day momentum
+    • Positive 90-day momentum
+    • Not excessively extended above its 50 SMA
+
+If nothing qualifies, cash is selected.
 """
 
 from dataclasses import dataclass
@@ -19,68 +30,106 @@ class DefensiveChoice:
 
 class DefensiveSelector:
 
-    SYMBOLS = (
-        "TLT",
-        "GLD",
-        "XLU",
-        "XLE",
-    )
+    def select(
 
-    def select(self, market):
+        self,
+
+        indicators,
+
+        profile,
+
+    ):
 
         candidates = []
 
-        for symbol in self.SYMBOLS:
+        for symbol in profile.defensive_assets:
 
-            history = market[symbol]
+            m30 = indicators.momentum_30(symbol)
 
-            close = history.close
+            m90 = indicators.momentum_90(symbol)
 
-            if len(close) < 100:
+            #
+            # Not enough history yet.
+            #
+
+            if (
+
+                m30 is None
+
+                or
+
+                m90 is None
+
+            ):
+
                 continue
 
-            m30 = (
-                close.iloc[-1]
-                / close.iloc[-31]
-                - 1
-            ) * 100
+            distance = indicators.distance_from_sma(
 
-            m90 = (
-                close.iloc[-1]
-                / close.iloc[-91]
-                - 1
-            ) * 100
+                symbol,
+
+                50,
+
+            )
 
             qualified = (
+
                 m30 > 0
-                and m90 > 0
+
+                and
+
+                m90 > 0
+
+                and
+
+                distance < profile.defensive_max_extension
+
             )
 
             candidates.append(
+
                 DefensiveChoice(
+
                     symbol=symbol,
+
                     momentum30=m30,
+
                     momentum90=m90,
+
                     qualified=qualified,
+
                 )
+
             )
 
         qualified = [
-            c
-            for c in candidates
-            if c.qualified
+
+            candidate
+
+            for candidate in candidates
+
+            if candidate.qualified
+
         ]
 
         if not qualified:
 
             return DefensiveChoice(
-                symbol="CASH",
+
+                symbol=profile.cash_asset,
+
                 momentum30=0,
+
                 momentum90=0,
+
                 qualified=True,
+
             )
 
         return max(
+
             qualified,
-            key=lambda x: x.momentum90,
+
+            key=lambda candidate: candidate.momentum90,
+
         )

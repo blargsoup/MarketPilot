@@ -22,5 +22,4 @@ def credit_stress(
 
     return (
         ratio.pct_change(window)
-        * 100
     )

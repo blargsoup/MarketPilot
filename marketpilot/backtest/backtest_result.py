@@ -1,19 +1,5 @@
 """
 Result of a completed backtest.
-
-This object is the central container returned by the BacktestEngine.
-
-It contains:
-
-    • Every daily simulation
-    • Every trade executed
-    • The portfolio equity curve
-    • The trading calendar
-    • Benchmark results
-    • Trade statistics
-
-Additional analysis (performance, statistics, charts, etc.) is
-attached later without requiring the engine to know about it.
 """
 
 from dataclasses import dataclass, field
@@ -35,7 +21,7 @@ class BacktestResult:
 
     equity_curve: list = field(default_factory=list)
 
-    calendar = None
+    calendar: object | None = None
 
     ####################################################################
     # Analysis Results
@@ -45,8 +31,12 @@ class BacktestResult:
 
     trade_statistics = None
 
+    performance = None
+
+    completed_trades: list = field(default_factory=list)
+
     ####################################################################
-    # Convenience Properties
+    # Convenience
     ####################################################################
 
     @property
@@ -62,22 +52,12 @@ class BacktestResult:
     @property
     def first_day(self):
 
-        if not self.simulations:
-            return None
-
-        return self.simulations[0]
+        return self.simulations[0] if self.simulations else None
 
     @property
     def last_day(self):
 
-        if not self.simulations:
-            return None
-
-        return self.simulations[-1]
-
-    ####################################################################
-    # Portfolio Helpers
-    ####################################################################
+        return self.simulations[-1] if self.simulations else None
 
     @property
     def starting_equity(self):

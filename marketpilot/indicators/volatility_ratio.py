@@ -1,8 +1,25 @@
 """
-Volatility Ratio (VR)
+Volatility Ratio
 
-Current realized volatility divided by its
-252-day moving average.
+A-RVol V3 definition:
+
+    Current 15-day realized volatility
+    ----------------------------------
+    Trailing 252-day average of 15-day
+    realized volatility
+
+The result is dimensionless.
+
+Examples:
+
+    0.80 = current volatility is 20% below its
+           trailing yearly average
+
+    1.00 = current volatility is at its
+           trailing yearly average
+
+    1.25 = current volatility is 25% above
+           its trailing yearly average
 """
 
 import pandas as pd
@@ -12,21 +29,30 @@ from .realized_volatility import realized_volatility
 
 def volatility_ratio(
     close: pd.Series,
-    short_window: int = 21,
-    long_window: int = 252,
+    rvol_window: int = 15,
+    average_window: int = 252,
 ) -> pd.Series:
+
     """
-    Calculate the Volatility Ratio (VR).
+    Calculate the A-RVol volatility ratio.
 
-    VR = Current realized volatility /
-         252-day average realized volatility
-
-    A value above 1.0 means volatility is higher than its
-    long-term average.
+    VR = current 15-day realized volatility /
+         trailing 252-day average of 15-day
+         realized volatility.
     """
 
-    rv = realized_volatility(close, short_window)
+    rvol = realized_volatility(
+        close,
+        window=rvol_window,
+    )
 
-    baseline = rv.rolling(long_window).mean()
+    trailing_average = (
+        rvol
+        .rolling(average_window)
+        .mean()
+    )
 
-    return rv / baseline
+    return (
+        rvol
+        / trailing_average
+    )

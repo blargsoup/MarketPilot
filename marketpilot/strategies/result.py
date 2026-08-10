@@ -17,3 +17,19 @@ class StrategyResult:
     changed: bool
 
     reasons: list[str]
+
+    @property
+    def action(self):
+        """
+        Human-readable description of the portfolio transition.
+        """
+
+        if not self.changed:
+
+            return "HOLD"
+
+        return (
+            f"{self.current_state.name}"
+            f" -> "
+            f"{self.new_state.name}"
+        )

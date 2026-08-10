@@ -1,9 +1,15 @@
 """
-Converts technical indicators into boolean trading signals.
+Market Signal Engine
 
-The IndicatorEngine performs all calculations.
+The SignalEngine converts raw indicator values into boolean
+conditions that strategies can evaluate.
 
-SignalEngine simply applies the strategy thresholds.
+IndicatorEngine performs all mathematical calculations.
+
+SignalEngine applies strategy thresholds.
+
+This separation keeps strategies readable while allowing the
+indicator calculations to be reused throughout MarketPilot.
 """
 
 from dataclasses import dataclass
@@ -18,7 +24,15 @@ class SignalEngine:
 
     profile: object
 
+    regime: object
+
+    donchian_regime: object
+
     def __post_init__(self):
+
+        ###############################################################
+        # Calculate indicators
+        ###############################################################
 
         indicators = IndicatorEngine(
 
@@ -28,35 +42,49 @@ class SignalEngine:
 
         )
 
+        ###############################################################
+        # Raw indicator values
+        ###############################################################
+
+        self.relative_volume = indicators.relative_volume
+
+        self.realized_volatility = indicators.realized_volatility
+
         #
-        # Raw indicator values.
+        # Temporary compatibility
         #
 
-        self.rvol = indicators.volatility.rvol_21
+        self.rvol = self.realized_volatility
 
-        self.vr = indicators.volatility.volume_ratio
+        self.vr = indicators.volatility_ratio
 
-        self.spy_distance = (
+        self.spy_distance = indicators.distance_from_sma(
 
-            indicators.trend.distance_from_200sma
+            self.profile.trend_asset,
+
+            200,
 
         )
 
-        self.credit = (
+        self.credit = indicators.credit_stress
 
-            indicators.credit.spread_20
+        self.donchian = indicators.donchian_break
 
-        )
+        self.momentum30 = indicators.momentum_30
 
-        self.donchian = (
+        self.momentum90 = indicators.momentum_90
 
-            indicators.breakout.donchian_break
+        ###############################################################
+        # Market Regime
+        ###############################################################
 
-        )
+        self.market_armed = self.regime.armed
 
-        #
-        # Moderate risk thresholds.
-        #
+        self.risk_enabled = self.regime.risk_enabled
+
+        ###############################################################
+        # Moderate Risk Thresholds
+        ###############################################################
 
         self.rvol_over_qld = (
 
@@ -74,9 +102,9 @@ class SignalEngine:
 
         )
 
-        #
-        # Defensive thresholds.
-        #
+        ###############################################################
+        # Defensive Thresholds
+        ###############################################################
 
         self.rvol_over_defensive = (
 
@@ -94,80 +122,102 @@ class SignalEngine:
 
         )
 
+        ###############################################################
+        # Recovery Thresholds
+        ###############################################################
+
         #
-        # Recovery.
+        # Moderate -> Aggressive
+        #
+        # All must be true:
+        # RVol < 14%
+        # VR < 0.90
+        # SPY > +3% above 200 SMA
         #
 
         self.rvol_clear = (
-
-            self.rvol
-
-            < self.profile.rvol_qld
-
+            self.rvol < self.profile.rvol_recovery
         )
 
         self.vr_clear = (
-
-            self.vr
-
-            < self.profile.vr_qld
-
+            self.vr < self.profile.vr_recovery
         )
 
+        #
+        # Defensive -> Moderate
+        #
+        # Normal exit conditions:
+        # RVol < 25%
+        # VR < 1.10
+        # SPY > -1.5% below 200 SMA
+        #
+
         self.rvol_defensive_clear = (
-
-            self.rvol
-
-            < self.profile.rvol_defensive
-
+            self.rvol < self.profile.rvol_defensive_recovery
         )
 
         self.vr_defensive_clear = (
-
-            self.vr
-
-            < self.profile.vr_defensive
-
+            self.vr < self.profile.vr_defensive_recovery
         )
 
-        #
-        # Trend.
-        #
+        ###############################################################
+        # Trend
+        ###############################################################
 
         self.spy_breakdown = (
-
-            self.spy_distance
-
-            < self.profile.spy_breakdown
-
+            self.spy_distance < self.profile.spy_breakdown
         )
 
-        self.spy_clear = not self.spy_breakdown
+        self.spy_clear = (
+            self.spy_distance > self.profile.spy_clear
+        )
 
-        self.spy_recovery = not self.spy_breakdown
+        self.spy_recovery = (
+            self.spy_distance > self.profile.spy_recovery
+        )
 
-        #
-        # Credit.
-        #
+        ###############################################################
+        # Credit
+        ###############################################################
 
         self.credit_crisis = (
-
-            self.credit
-
-            < self.profile.credit_threshold
-
+            self.credit < self.profile.credit_threshold
         )
 
-        #
-        # Breakouts.
-        #
+        ###############################################################
+        # Donchian
+        ###############################################################
 
         self.donchian_break = self.donchian
 
         self.donchian_confirmed = (
-
             self.donchian
+            and
+            self.rvol >= self.profile.donchian_rvol
+        )
 
-            and self.rvol_over_defensive
+        ###############################################################
+        # Donchian Recovery
+        ###############################################################
 
+        close = indicators.signal_history.latest_close
+
+        self.donchian_active = (
+            self.donchian_regime.active
+        )
+
+        self.donchian_recovery = (
+            self.donchian_regime.recovery_percent(close)
+        )
+
+        self.donchian_recovered = (
+            self.donchian_regime.active
+            and
+            self.donchian_recovery >= self.profile.donchian_recovery
+        )
+
+        self.donchian_timeout = (
+            self.donchian_regime.active
+            and
+            self.donchian_regime.days_active >= self.profile.donchian_timeout
         )
