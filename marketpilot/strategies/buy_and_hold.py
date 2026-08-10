@@ -17,37 +17,32 @@ class BuyAndHoldStrategy(Strategy):
     """
 
     def __init__(
-
         self,
-
         profile=NASDAQ_PROFILE,
-
     ):
 
         self.profile = profile
 
         self.initial_state = PortfolioState.AGGRESSIVE
 
-        self.name = f"Buy & Hold ({profile.name})"
+        #
+        # Include the actual ETF being held in the benchmark name.
+        #
+        self.name = (
+            f"Buy & Hold "
+            f"{profile.aggressive_asset} "
+            f"({profile.name})"
+        )
 
     def evaluate(
-
         self,
-
         current_state,
-
         signals,
-
     ):
 
         return StrategyResult(
-
             current_state=current_state,
-
             new_state=current_state,
-
             changed=False,
-
             reasons=[],
-
         )

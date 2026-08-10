@@ -50,8 +50,37 @@ class BacktestEngine:
 
         diagnostics = StrategyDiagnostics()
 
+        #
+        # Assets required for strategy calculations.
+        #
+        # These determine the historical backtest calendar.
+        #
+        # Optional assets such as SGOV, AVUV, etc. must not shorten
+        # the available backtest history.
+        #
+        required_symbols = [
+            strategy.profile.signal_asset,
+            strategy.profile.trend_asset,
+            strategy.profile.aggressive_asset,
+            strategy.profile.moderate_asset,
+
+            #
+            # Credit stress indicator dependencies.
+            #
+            "HYG",
+            "LQD",
+        ]
+
+        #
+        # Remove duplicates while preserving order.
+        #
+        required_symbols = list(
+            dict.fromkeys(required_symbols)
+        )
+
         calendar = MarketCalendar.from_market(
             market,
+            required_symbols=required_symbols,
         )
 
         portfolio = Portfolio(
