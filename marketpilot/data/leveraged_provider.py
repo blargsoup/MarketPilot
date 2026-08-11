@@ -72,7 +72,97 @@ class LeveragedETFProvider:
                     f"{len(bad)} zero/negative prices."
                 )
 
+    #####
 
+    def validate_history(
+        self,
+        df: pd.DataFrame,
+        symbol: str,
+    ) -> None:
+        """
+        Validate a completed leveraged ETF history.
+
+        Synthetic histories must never contain missing, non-finite,
+        or non-positive prices because those can silently corrupt
+        backtest results.
+        """
+
+        if df is None or df.empty:
+            raise ValueError(
+                f"{symbol}: history is empty"
+            )
+
+        required_columns = [
+            "Open",
+            "High",
+            "Low",
+            "Close",
+            "Adj Close",
+        ]
+
+        missing = [
+            column
+            for column in required_columns
+            if column not in df.columns
+        ]
+
+        if missing:
+            raise ValueError(
+                f"{symbol}: missing columns: {missing}"
+            )
+
+        if not isinstance(
+            df.index,
+            pd.DatetimeIndex,
+        ):
+            raise ValueError(
+                f"{symbol}: index must be a DatetimeIndex"
+            )
+
+        if df.index.has_duplicates:
+            raise ValueError(
+                f"{symbol}: duplicate dates detected"
+            )
+
+        if not df.index.is_monotonic_increasing:
+            raise ValueError(
+                f"{symbol}: dates are not sorted"
+            )
+
+        prices = df[required_columns]
+
+        if prices.isna().any().any():
+            raise ValueError(
+                f"{symbol}: NaN prices detected"
+            )
+
+        if not prices.apply(
+            lambda column: pd.Series(
+                pd.notna(column)
+                & (column != float("inf"))
+                & (column != float("-inf")),
+                index=column.index,
+            ).all()
+        ).all():
+            raise ValueError(
+                f"{symbol}: infinite prices detected"
+            )
+
+        for column in required_columns:
+            if (df[column] <= 0).any():
+                bad_date = df.index[
+                    df[column] <= 0
+                ][0]
+
+                bad_value = df.loc[
+                    bad_date,
+                    column,
+                ]
+
+                raise ValueError(
+                    f"{symbol}: non-positive {column} "
+                    f"value {bad_value} on {bad_date}"
+                )
 
     def get_history(
         self,
