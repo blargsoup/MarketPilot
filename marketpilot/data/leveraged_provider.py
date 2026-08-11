@@ -65,7 +65,7 @@ class LeveragedETFProvider:
         )
 
         underlying_df = underlying.copy()
-        actual_df = actual_history.data.copy()
+        actual_df = actual_history.copy()
         treasury_df = treasury.copy()
 
         #
