@@ -161,6 +161,23 @@ class Portfolio:
     # Daily Update
     ####################################################################
 
+    def _has_price(self, market, symbol):
+        """
+        Return True if the asset has a valid closing price
+        available for the current backtest date.
+        """
+
+        if symbol not in market.keys():
+            return False
+
+        history = market[symbol]
+
+        if history.data.empty:
+            return False
+
+        return True
+
+
     def update(
         self,
         date,
@@ -185,6 +202,34 @@ class Portfolio:
         #
         # Get today's closing price for the position being held today.
         #
+
+        if not self._has_price(
+            market,
+            self.current_symbol,
+        ):
+
+            #
+            # The current asset did not exist yet.
+            #
+            # Do not attempt to calculate a return from
+            # an empty price history.
+            #
+
+            self.curve.append(
+
+                EquityPoint(
+
+                    date=date,
+
+                    equity=self.equity,
+
+                    state=self.current_state,
+
+                )
+
+            )
+
+            return
 
         history = market[
             self.current_symbol
