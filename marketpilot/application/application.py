@@ -78,6 +78,52 @@ class Application:
         )
 
         #
+        # Synthetic leveraged ETF sanity checks.
+        #
+
+        if "TQQQ" in market:
+
+            tqqq = market["TQQQ"]
+
+            logger.info("")
+            logger.info(
+                "Synthetic ETF Validation"
+            )
+            logger.info(
+                "------------------------------"
+            )
+
+            logger.info(
+                "TQQQ First Date : %s",
+                tqqq.first_date,
+            )
+
+            logger.info(
+                "TQQQ Last Date  : %s",
+                tqqq.last_date,
+            )
+
+            logger.info(
+                "TQQQ Rows       : %d",
+                tqqq.rows,
+            )
+
+            logger.info(
+                "TQQQ First Close: %.6f",
+                tqqq.data["Close"].iloc[0],
+            )
+
+            logger.info(
+                "TQQQ Last Close : %.6f",
+                tqqq.data["Close"].iloc[-1],
+            )
+
+            logger.info(
+                "TQQQ Min Close  : %.6f",
+                tqqq.data["Close"].min(),
+            )
+
+        #
         # Daily mode
         #
 

@@ -78,6 +78,15 @@ class BacktestEngine:
             dict.fromkeys(required_symbols)
         )
 
+        required_symbols = {
+            strategy.profile.signal_asset,
+            strategy.profile.trend_asset,
+            strategy.profile.aggressive_asset,
+            strategy.profile.moderate_asset,
+            strategy.profile.cash_asset,
+            *strategy.profile.defensive_assets,
+        }
+
         calendar = MarketCalendar.from_market(
             market,
             required_symbols=required_symbols,

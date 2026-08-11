@@ -18,6 +18,21 @@ class MarketDataService:
     Main interface for obtaining market data.
     """
 
+    SYNTHETIC_LEVERAGED = {
+        "QLD": {
+            "underlying": "QQQ",
+            "leverage": 2.0,
+            "expense_ratio": 0.0095,
+            "financing_asset": "TBILL",
+        },
+        "TQQQ": {
+            "underlying": "QQQ",
+            "leverage": 3.0,
+            "expense_ratio": 0.0095,
+            "financing_asset": "TBILL",
+        },
+    }
+
     def __init__(self):
 
         self.provider = YahooDataProvider()
@@ -231,24 +246,6 @@ class MarketDataService:
             symbol=symbol,
             data=df,
         )
-
-    SYNTHETIC_LEVERAGED = {
-
-        "QLD": {
-            "underlying": "QQQ",
-            "leverage": 2.0,
-            "expense_ratio": 0.0095,
-            "financing_asset": "TBILL",
-        },
-
-        "TQQQ": {
-            "underlying": "QQQ",
-            "leverage": 3.0,
-            "expense_ratio": 0.0095,
-            "financing_asset": "TBILL",
-        },
-
-    }
 
     def _provider_for(
         self,

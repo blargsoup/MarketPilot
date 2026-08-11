@@ -1,21 +1,23 @@
 """
 Synthetic leveraged ETF provider.
 
-Creates a continuous history for leveraged ETFs by:
+Creates a continuous historical series for leveraged ETFs by:
 
-    1. Using the real ETF history from its inception onward.
-    2. Reconstructing a synthetic history before inception using:
-         - The underlying ETF's daily total return
-         - The requested leverage
-         - Historical Treasury bill rates as a financing-cost proxy
-         - The ETF expense ratio
+1. Using the real ETF history from its inception onward.
+2. Reconstructing a synthetic pre-inception history using:
+   - The underlying ETF's daily total return
+   - Daily leverage
+   - Historical Treasury bill rates as a financing proxy
+   - ETF expense ratio
 
-The synthetic history is intended for historical backtesting, not
-for reproducing the exact historical NAV of an ETF that did not yet
-exist.
+The synthetic history is intended for historical research and
+backtesting. It is not intended to reproduce the exact historical
+NAV of an ETF that did not yet exist.
 """
 
 from __future__ import annotations
+
+import math
 
 import pandas as pd
 
@@ -29,11 +31,48 @@ class LeveragedETFProvider:
         leverage: float,
         expense_ratio: float,
     ):
-
         self.underlying_provider = underlying_provider
         self.treasury_provider = treasury_provider
         self.leverage = leverage
         self.expense_ratio = expense_ratio
+
+        def validate_history(
+            self,
+            symbol: str,
+            history: pd.DataFrame,
+        ) -> None:
+
+            if history.empty:
+                raise ValueError(
+                    f"{symbol} history is empty."
+                )
+
+            if "Close" not in history.columns:
+                raise ValueError(
+                    f"{symbol} history has no Close column."
+                )
+
+            close = history["Close"]
+
+            if close.isna().any():
+                raise ValueError(
+                    f"{symbol} history contains NaN closes."
+                )
+
+            if not close.apply(math.isfinite).all():
+                raise ValueError(
+                    f"{symbol} history contains non-finite closes."
+                )
+
+            if (close <= 0).any():
+                bad = close[close <= 0]
+
+                raise ValueError(
+                    f"{symbol} history contains "
+                    f"{len(bad)} zero/negative prices."
+                )
+
+
 
     def get_history(
         self,
@@ -55,7 +94,7 @@ class LeveragedETFProvider:
         )
 
         #
-        # Get historical Treasury bill rates.
+        # Get historical financing rates.
         #
 
         treasury = self.treasury_provider.get_history(
@@ -84,109 +123,124 @@ class LeveragedETFProvider:
             treasury_df.index
         )
 
-        #
-        # We use adjusted close because it represents the
-        # underlying ETF's total-return history.
-        #
-
-        if "Adj Close" in underlying_df.columns:
-
-            underlying_close = underlying_df[
-                "Adj Close"
-            ]
-
-        else:
-
-            underlying_close = underlying_df[
-                "Close"
-            ]
+        underlying_df = underlying_df.sort_index()
+        actual_df = actual_df.sort_index()
+        treasury_df = treasury_df.sort_index()
 
         #
-        # Determine the actual ETF inception date.
+        # Determine actual ETF inception date.
         #
 
         actual_start = actual_df.index.min()
 
         #
-        # Only create synthetic history before the real ETF existed.
+        # We only synthesize history before the real ETF existed.
         #
 
-        synthetic_underlying = underlying_close[
-            underlying_close.index < actual_start
+        synthetic_underlying = underlying_df[
+            underlying_df.index < actual_start
         ].copy()
 
         if synthetic_underlying.empty:
-
             return actual_df
 
         #
-        # Treasury rates.
+        # Select underlying total-return price.
         #
-        # TBILL is represented as an annualized percentage,
-        # e.g. 5.00 means 5%.
+        # Adj Close is preferred because it incorporates
+        # distributions.
+        #
+
+        if "Adj Close" in synthetic_underlying.columns:
+            underlying_close = synthetic_underlying[
+                "Adj Close"
+            ].copy()
+
+        else:
+            underlying_close = synthetic_underlying[
+                "Close"
+            ].copy()
+
+        #
+        # Remove invalid underlying prices.
+        #
+
+        underlying_close = underlying_close[
+            underlying_close.notna()
+        ]
+
+        underlying_close = underlying_close[
+            underlying_close > 0
+        ]
+
+        if len(underlying_close) < 2:
+            raise ValueError(
+                f"Insufficient underlying history to synthesize "
+                f"{symbol}."
+            )
+
+        #
+        # Treasury rate.
         #
 
         if "Close" in treasury_df.columns:
-
-            treasury_rate = treasury_df["Close"].copy()
+            treasury_rate = treasury_df[
+                "Close"
+            ].copy()
 
         elif "Adj Close" in treasury_df.columns:
-
-            treasury_rate = treasury_df["Adj Close"].copy()
+            treasury_rate = treasury_df[
+                "Adj Close"
+            ].copy()
 
         else:
-
             raise ValueError(
                 "TBILL history must contain a Close or "
                 "Adj Close column."
             )
 
         #
-        # FRED's DTB3 series is expressed as a percentage.
+        # FRED DTB3 is expressed as a percentage.
         #
-        # Convert:
+        # Example:
         #
-        #     5.00 -> 0.05
+        # 5.00 -> 0.05
         #
 
         treasury_rate = treasury_rate / 100.0
 
         #
-        # Align Treasury data to the QQQ trading dates.
-        #
-        # Forward-fill weekends / holidays and missing observations.
+        # Align financing rate with underlying trading dates.
         #
 
         financing_rate = (
             treasury_rate
-            .reindex(
-                synthetic_underlying.index
-            )
+            .reindex(underlying_close.index)
             .ffill()
             .bfill()
         )
 
         #
-        # Daily QQQ total return.
+        # Daily underlying return.
         #
 
         underlying_return = (
-            synthetic_underlying
-            .pct_change()
+            underlying_close.pct_change()
+        )
+
+        underlying_return = (
+            underlying_return.dropna()
+        )
+
+        financing_rate = (
+            financing_rate
+            .reindex(underlying_return.index)
+            .ffill()
+            .bfill()
         )
 
         #
-        # First observation cannot have a return.
-        #
-
-        underlying_return = underlying_return.dropna()
-
-        financing_rate = financing_rate.reindex(
-            underlying_return.index
-        ).ffill().bfill()
-
-        #
-        # Convert annual expense ratio into a daily drag.
+        # Annual expense ratio -> daily expense drag.
         #
 
         daily_expense = (
@@ -196,14 +250,10 @@ class LeveragedETFProvider:
         #
         # Approximate financing cost.
         #
-        # A leveraged position has approximately
-        # (leverage - 1) times the underlying exposure
-        # financed.
+        # For:
         #
-        # Example:
-        #
-        # 2x QQQ -> approximately 1x financed
-        # 3x QQQ -> approximately 2x financed
+        # 2x -> finance approximately 1x
+        # 3x -> finance approximately 2x
         #
 
         daily_financing = (
@@ -213,7 +263,7 @@ class LeveragedETFProvider:
         )
 
         #
-        # Synthetic daily leveraged return.
+        # Synthetic leveraged daily return.
         #
 
         leveraged_return = (
@@ -224,58 +274,78 @@ class LeveragedETFProvider:
         )
 
         #
-        # We need to anchor the synthetic series to the actual
-        # ETF at inception.
+        # A leveraged ETF cannot have a daily loss below -100%.
         #
-        # Start with the first actual ETF close and work backward.
+        # This also protects the reconstruction from producing
+        # zero/negative prices when an extreme underlying move
+        # occurs.
         #
 
-        first_actual_close = float(
+        leveraged_return = leveraged_return.clip(
+            lower=-0.999999
+        )
+
+        #
+        # ----------------------------------------------------------
+        # Build the synthetic history FORWARD.
+        # ----------------------------------------------------------
+        #
+        # We first create a normalized synthetic series beginning
+        # at 1.0.
+        #
+        # This is much safer than recursively working backwards
+        # from the real ETF price.
+        #
+
+        synthetic_normalized = (
+            (1.0 + leveraged_return)
+            .cumprod()
+        )
+
+        #
+        # The last synthetic value before inception becomes the
+        # anchor point for the real ETF.
+        #
+
+        if synthetic_normalized.empty:
+            return actual_df
+
+        synthetic_last = float(
+            synthetic_normalized.iloc[-1]
+        )
+
+        actual_first_close = float(
             actual_df["Close"].iloc[0]
         )
 
-        synthetic_values = pd.Series(
-            index=leveraged_return.index,
-            dtype=float,
+        if (
+            not math.isfinite(actual_first_close)
+            or actual_first_close <= 0
+        ):
+            raise ValueError(
+                f"Invalid first actual {symbol} close: "
+                f"{actual_first_close}"
+            )
+
+        #
+        # Scale the entire synthetic series so that its final
+        # pre-inception value matches the first actual ETF close.
+        #
+
+        scale_factor = (
+            actual_first_close
+            / synthetic_last
+        )
+
+        synthetic_values = (
+            synthetic_normalized
+            * scale_factor
         )
 
         #
-        # Reverse the daily return relationship:
-        #
-        #     tomorrow = today * (1 + return)
-        #
-        # therefore:
-        #
-        #     today = tomorrow / (1 + return)
-        #
-
-        next_value = first_actual_close
-
-        for date in reversed(
-            leveraged_return.index
-        ):
-
-            daily_return = float(
-                leveraged_return.loc[date]
-            )
-
-            previous_value = (
-                next_value
-                / (1.0 + daily_return)
-            )
-
-            synthetic_values.loc[date] = (
-                previous_value
-            )
-
-            next_value = previous_value
-
-        #
+        # ----------------------------------------------------------
         # Build synthetic OHLC data.
-        #
-        # The exact historical OHLC of a non-existent leveraged
-        # ETF cannot be known, so we construct a synthetic Close
-        # series and use it consistently.
+        # ----------------------------------------------------------
         #
 
         synthetic_df = pd.DataFrame(
@@ -286,17 +356,71 @@ class LeveragedETFProvider:
         synthetic_df["High"] = synthetic_values
         synthetic_df["Low"] = synthetic_values
         synthetic_df["Close"] = synthetic_values
-
         synthetic_df["Adj Close"] = synthetic_values
-
-        #
-        # Volume does not meaningfully exist for a synthetic ETF.
-        #
-
         synthetic_df["Volume"] = 0
 
         #
-        # Combine synthetic history with the real ETF history.
+        # ----------------------------------------------------------
+        # Validate synthetic history.
+        # ----------------------------------------------------------
+        #
+
+        if not synthetic_df["Close"].notna().all():
+            raise ValueError(
+                f"Synthetic {symbol} history contains NaN values."
+            )
+
+        if not synthetic_df["Close"].apply(
+            math.isfinite
+        ).all():
+            raise ValueError(
+                f"Synthetic {symbol} history contains "
+                f"non-finite values."
+            )
+
+        if (synthetic_df["Close"] <= 0).any():
+            raise ValueError(
+                f"Synthetic {symbol} history contains "
+                f"zero/negative prices."
+            )
+
+        #
+        # ----------------------------------------------------------
+        # Validate handoff to actual ETF.
+        # ----------------------------------------------------------
+        #
+
+        last_synthetic_close = float(
+            synthetic_df["Close"].iloc[-1]
+        )
+
+        #
+        # The synthetic series should end very close to the
+        # first actual close.
+        #
+        # They may differ slightly because the actual ETF's first
+        # trading day is not itself included in the synthetic
+        # series.
+        #
+
+        handoff_ratio = (
+            actual_first_close
+            / last_synthetic_close
+        )
+
+        if not (
+            0.95
+            <= handoff_ratio
+            <= 1.05
+        ):
+            raise ValueError(
+                f"{symbol} synthetic/actual handoff is "
+                f"outside tolerance: "
+                f"{handoff_ratio:.4f}"
+            )
+
+        #
+        # Combine synthetic history with actual history.
         #
 
         combined = pd.concat(
@@ -307,9 +431,7 @@ class LeveragedETFProvider:
         )
 
         #
-        # Remove duplicate dates.
-        #
-        # Real ETF data wins at inception.
+        # Real ETF data wins if a date overlaps.
         #
 
         combined = (
@@ -320,5 +442,57 @@ class LeveragedETFProvider:
             ]
             .sort_index()
         )
+
+        self.validate_history(
+            symbol,
+            combined,
+        )
+
+        #
+        # Handoff diagnostics.
+        #
+
+        if not synthetic_df.empty:
+
+            synthetic_last_date = (
+                synthetic_df.index[-1]
+            )
+
+            synthetic_last_close = float(
+                synthetic_df["Close"].iloc[-1]
+            )
+
+            actual_first_date = actual_df.index[0]
+
+            actual_first_close = float(
+                actual_df["Close"].iloc[0]
+            )
+
+            print(
+                f"Synthetic {symbol}:"
+            )
+
+            print(
+                f"    Synthetic last : "
+                f"{synthetic_last_date.date()} "
+                f"${synthetic_last_close:.6f}"
+            )
+
+            print(
+                f"    Actual first   : "
+                f"{actual_first_date.date()} "
+                f"${actual_first_close:.6f}"
+            )
+
+            print(
+                f"    Handoff ratio  : "
+                f"{actual_first_close / synthetic_last_close:.4f}"
+            )
+
+            print(
+                f"    Synthetic first: "
+                f"{synthetic_df.index[0].date()} "
+                f"${synthetic_df['Close'].iloc[0]:.6f}"
+            )
 
         return combined
