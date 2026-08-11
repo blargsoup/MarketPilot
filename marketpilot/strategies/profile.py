@@ -155,7 +155,7 @@ NASDAQ_PROFILE = StrategyProfile(
 
     ),
 
-    cash_asset="SGOV",
+    cash_asset="TBILL",
 
 )
 
@@ -185,7 +185,7 @@ SEMICONDUCTOR_PROFILE = StrategyProfile(
 
     ),
 
-    cash_asset="SGOV",
+    cash_asset="TBILL",
 
 )
 
@@ -215,6 +215,6 @@ SP500_PROFILE = StrategyProfile(
 
     ),
 
-    cash_asset="SGOV",
+    cash_asset="TBILL",
 
 )

@@ -249,6 +249,16 @@ MARKET_UNIVERSE = [
     #
 
     Asset(
+        "TBILL",
+        "3-Month U.S. Treasury Bills",
+        "Synthetic Treasury Cash Equivalent",
+        "Cash",
+        1,
+        False,
+        "Cash",
+    ),
+
+    Asset(
         "SGOV",
         "iShares Treasury 0-3 Month",
         "Cash Equivalent",

@@ -8,6 +8,7 @@ from marketpilot.cache import CacheManager
 from marketpilot.models import MarketHistory
 
 from .yahoo_data_provider import YahooDataProvider
+from .treasury_bill_provider import TreasuryBillProvider
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 
@@ -19,6 +20,11 @@ class MarketDataService:
     def __init__(self):
 
         self.provider = YahooDataProvider()
+
+        self.providers = {
+            "TBILL": TreasuryBillProvider(),
+        }
+
         self.cache = CacheManager()
 
     def get_history(
@@ -28,6 +34,38 @@ class MarketDataService:
         interval="1d",
         refresh=True,
     ) -> MarketHistory:
+
+        if symbol == "TBILL" and self.cache.exists(symbol):
+
+            if not refresh:
+
+                return MarketHistory(
+                    symbol=symbol,
+                    data=self.cache.load(symbol),
+                )
+
+            #
+            # FRED is small enough that refreshing the complete
+            # historical series is acceptable.
+            #
+
+            provider = self._provider_for(symbol)
+
+            df = provider.get_history(
+                symbol,
+                period="max",
+                interval=interval,
+            )
+
+            self.cache.save(
+                symbol,
+                df,
+            )
+
+            return MarketHistory(
+                symbol=symbol,
+                data=df,
+            )
 
         #
         # Existing cache
@@ -50,7 +88,11 @@ class MarketDataService:
             # Only fetch recent history
             #
 
-            latest = self.provider.get_history(
+            provider = self._provider_for(
+                symbol
+            )
+
+            latest = provider.get_history(
                 symbol,
                 period="10d",
                 interval=interval,
@@ -102,7 +144,11 @@ class MarketDataService:
 
         print(f"Creating cache for {symbol}...")
 
-        df = self.provider.get_history(
+        provider = self._provider_for(
+            symbol
+        )
+
+        df = provider.get_history(
             symbol,
             period="max",
             interval=interval,
@@ -113,6 +159,15 @@ class MarketDataService:
         return MarketHistory(
             symbol=symbol,
             data=df,
+        )
+
+    def _provider_for(
+        self,
+        symbol: str,
+    ):
+        return self.providers.get(
+            symbol,
+            self.provider,
         )
 
     def get_histories(
