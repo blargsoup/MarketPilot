@@ -53,31 +53,88 @@ class TreasuryBillProvider(MarketDataProvider):
 
             content = response.read().decode("utf-8")
 
+        #
+        # Parse the CSV first without assuming column names.
+        #
+
         raw = pd.read_csv(
-            StringIO(content),
-            parse_dates=["DATE"],
+            StringIO(content)
         )
 
-        raw = raw.rename(
-            columns={
-                "DATE": "Date",
-                "DTB3": "Rate",
-            }
-        )
-
-        raw = raw.set_index("Date")
-
         #
-        # FRED represents missing observations as ".".
+        # Normalize column names.
         #
 
-        raw["Rate"] = pd.to_numeric(
-            raw["Rate"],
+        raw.columns = [
+            str(column).strip().upper()
+            for column in raw.columns
+        ]
+
+        #
+        # FRED normally returns DATE and DTB3.
+        # Find them explicitly so that we get a useful error
+        # if the endpoint returns something unexpected.
+        #
+
+        date_column = None
+        rate_column = None
+
+        for column in raw.columns:
+
+            if column in (
+                "DATE",
+                "DATE_TIME",
+                "TIME",
+                "OBSERVATION_DATE",
+            ):
+
+                date_column = column
+
+            if column == "DTB3":
+
+                rate_column = column
+
+        if date_column is None:
+
+            raise ValueError(
+                "Could not find date column in FRED response. "
+                f"Columns returned: {list(raw.columns)}"
+            )
+
+        if rate_column is None:
+
+            raise ValueError(
+                "Could not find DTB3 column in FRED response. "
+                f"Columns returned: {list(raw.columns)}"
+            )
+
+        #
+        # Parse dates.
+        #
+
+        raw[date_column] = pd.to_datetime(
+            raw[date_column],
             errors="coerce",
         )
 
+        #
+        # Convert FRED's '.' missing values to NaN.
+        #
+
+        raw[rate_column] = pd.to_numeric(
+            raw[rate_column],
+            errors="coerce",
+        )
+
+        #
+        # Remove invalid observations.
+        #
+
         raw = raw.dropna(
-            subset=["Rate"]
+            subset=[
+                date_column,
+                rate_column,
+            ]
         )
 
         if raw.empty:
@@ -86,38 +143,41 @@ class TreasuryBillProvider(MarketDataProvider):
                 "FRED returned no valid DTB3 observations"
             )
 
+        raw = raw.set_index(
+            date_column
+        )
+
+        raw = raw.sort_index()
+
         #
-        # DTB3 is a discount-basis annualized rate.
+        # FRED DTB3 is the 3-month Treasury bill secondary-market
+        # rate quoted on a discount basis.
         #
-        # Convert the discount rate to an approximate annual
-        # investment yield using a 91-day bill and a 360-day
-        # discount convention.
-        #
-        # d = discount rate
-        # y = investment yield
-        #
-        # y = d * 365 / (360 - d * 91)
-        #
-        # Rate is supplied by FRED in percent.
+        # Convert the discount rate into an approximate investment
+        # yield using the standard 91-day bill / 360-day convention.
         #
 
-        discount = raw["Rate"] / 100.0
+        discount = raw[rate_column] / 100.0
 
         annual_yield = (
             discount * 365.0
-            / (
+            /
+            (
                 360.0
-                - discount * 91.0
+                -
+                discount * 91.0
             )
         )
 
         #
-        # Build a synthetic price index.
+        # Build a synthetic total-return price index.
         #
-        # The Treasury rate is an annualized rate, so compound
-        # it across the actual number of calendar days between
-        # observations. This means weekends and holidays earn
-        # interest as they should.
+        # Start at 100.
+        #
+        # Interest earned between observations is based on the
+        # previous observation's annualized yield.
+        #
+        # This naturally includes weekend and holiday accrual.
         #
 
         prices = [100.0]
@@ -131,7 +191,8 @@ class TreasuryBillProvider(MarketDataProvider):
 
             days = (
                 current_date
-                - previous_date
+                -
+                previous_date
             ).days
 
             rate = annual_yield.iloc[i - 1]
@@ -149,7 +210,7 @@ class TreasuryBillProvider(MarketDataProvider):
         raw["Close"] = prices
 
         #
-        # Cash has no meaningful OHLC variation.
+        # Synthetic cash has no intraday price movement.
         #
 
         raw["Open"] = raw["Close"]
@@ -157,7 +218,7 @@ class TreasuryBillProvider(MarketDataProvider):
         raw["Low"] = raw["Close"]
 
         #
-        # No trading volume exists for the synthetic series.
+        # No meaningful trading volume exists.
         #
 
         raw["Volume"] = 0
