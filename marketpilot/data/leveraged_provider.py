@@ -534,8 +534,8 @@ class LeveragedETFProvider:
         )
 
         self.validate_history(
-            symbol,
             combined,
+            symbol,
         )
 
         #
