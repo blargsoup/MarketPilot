@@ -2,9 +2,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Dict, Optional
-
+import logging
 import pandas as pd
 
+logger = logging.getLogger(__name__)
 
 @dataclass
 class ForwardCompoundResult:
@@ -69,9 +70,55 @@ class ForwardCompounder:
                     "was not found in market data."
                 )
 
-            prices = market[symbol].data["Close"].astype(float)
+            prices = market[symbol].data[price_column].astype(float)
 
             returns[state] = prices.pct_change()
+
+            prices = market[symbol].data[price_column].astype(float)
+
+            asset_returns = prices.pct_change()
+
+            returns[state] = asset_returns
+
+        
+
+        logger = logging.getLogger(__name__)
+
+        for state, symbol in self.state_assets.items():
+
+            asset_returns = returns[state].dropna()
+
+            logger.info(
+                "Forward return diagnostics: "
+                "%s (%s)",
+                state,
+                symbol,
+            )
+
+            logger.info(
+                "    First return : %.6f%%",
+                asset_returns.iloc[0] * 100,
+            )
+
+            logger.info(
+                "    Worst return : %.6f%%",
+                asset_returns.min() * 100,
+            )
+
+            logger.info(
+                "    Best return  : %.6f%%",
+                asset_returns.max() * 100,
+            )
+
+            logger.info(
+                "    Mean return  : %.6f%%",
+                asset_returns.mean() * 100,
+            )
+
+            logger.info(
+                "    Return rows  : %d",
+                len(asset_returns),
+            )
 
         returns_df = pd.DataFrame(returns)
 
