@@ -38,6 +38,7 @@ from marketpilot.reports import (
     TradeReport,
 )
 from marketpilot.diagnostics.strategy_report import StrategyReport
+from marketpilot.backtest.forward_compound import ForwardCompounder
 
 class Application:
 
@@ -330,4 +331,62 @@ class Application:
 
             backtest_result.diagnostics,
 
+        )
+
+        forward_compounder = ForwardCompounder(
+            starting_value=100_000.0,
+            state_assets={
+                "AGGRESSIVE": "TQQQ",
+                "MODERATE": "QLD",
+                "DEFENSIVE": "TBILL",
+            },
+        )
+
+        forward_result = forward_compounder.run(
+            market=market,
+            states=state_series,
+        )
+
+        logger.info("")
+        logger.info("Forward Compounding Model")
+        logger.info("------------------------------")
+
+        logger.info(
+            "Starting Value : $%,.2f",
+            forward_result.starting_value,
+        )
+
+        logger.info(
+            "Ending Value   : $%,.2f",
+            forward_result.ending_value,
+        )
+
+        logger.info(
+            "Total Return   : %.2f%%",
+            forward_result.total_return * 100,
+        )
+
+        logger.info(
+            "Annual CAGR    : %.2f%%",
+            forward_result.cagr * 100,
+        )
+
+        logger.info(
+            "Max Drawdown   : %.2f%%",
+            forward_result.max_drawdown * 100,
+        )
+
+        logger.info(
+            "Aggressive Days: %d",
+            forward_result.aggressive_days,
+        )
+
+        logger.info(
+            "Moderate Days  : %d",
+            forward_result.moderate_days,
+        )
+
+        logger.info(
+            "Defensive Days : %d",
+            forward_result.defensive_days,
         )
