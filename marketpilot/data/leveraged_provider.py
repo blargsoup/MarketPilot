@@ -214,6 +214,19 @@ class LeveragedETFProvider:
 
         underlying_df = underlying.copy()
         actual_df = actual_history.copy()
+
+        ####################################
+        # Yahoo may return an all-NaN Adj Close column for
+        # leveraged ETFs. For this synthetic reconstruction,
+        # Close is our authoritative price series.
+        #
+        # If Adj Close is missing or entirely NaN, use Close.
+        if (
+            "Adj Close" not in actual_df.columns
+            or actual_df["Adj Close"].isna().all()
+        ):
+            actual_df["Adj Close"] = actual_df["Close"]
+
         treasury_df = treasury.copy()
 
         #
