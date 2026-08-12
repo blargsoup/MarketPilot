@@ -16,10 +16,10 @@ NAV of an ETF that did not yet exist.
 """
 
 from __future__ import annotations
-
 import math
-
+import logging
 import pandas as pd
+logger = logging.getLogger(__name__)
 
 
 class LeveragedETFProvider:
@@ -132,8 +132,27 @@ class LeveragedETFProvider:
         prices = df[required_columns]
 
         if prices.isna().any().any():
+
+            nan_summary = (
+                prices.isna()
+                .sum()
+                .loc[lambda x: x > 0]
+                .to_dict()
+            )
+
+            nan_rows = prices[
+                prices.isna().any(axis=1)
+            ]
+
+            first_nan_date = nan_rows.index.min()
+            last_nan_date = nan_rows.index.max()
+
             raise ValueError(
-                f"{symbol}: NaN prices detected"
+                f"{symbol}: NaN prices detected. "
+                f"Columns: {nan_summary}. "
+                f"First date: {first_nan_date}. "
+                f"Last date: {last_nan_date}. "
+                f"Rows affected: {len(nan_rows)}"
             )
 
         if not prices.apply(
@@ -531,6 +550,49 @@ class LeveragedETFProvider:
                 )
             ]
             .sort_index()
+        )
+
+########
+        logger.info(
+            f"{symbol} history validation: "
+            f"{len(combined)} rows, "
+            f"{combined.index.min().date()} -> "
+            f"{combined.index.max().date()}"
+        )
+
+        logger.info(
+            f"{symbol} actual history: "
+            f"{len(actual_df)} rows, "
+            f"{actual_df.index.min().date()} -> "
+            f"{actual_df.index.max().date()}"
+        )
+
+        logger.info(
+            f"{symbol} synthetic history: "
+            f"{len(synthetic_df)} rows, "
+            f"{synthetic_df.index.min().date()} -> "
+            f"{synthetic_df.index.max().date()}"
+        )
+
+        handoff_start = actual_df.index.min()
+
+        logger.info(
+            f"{symbol} handoff window:"
+        )
+
+        logger.info(
+            "\n" +
+            combined.loc[
+                handoff_start - pd.Timedelta(days=5):
+                handoff_start + pd.Timedelta(days=5),
+                [
+                    "Open",
+                    "High",
+                    "Low",
+                    "Close",
+                    "Adj Close",
+                ],
+            ].to_string()
         )
 
         self.validate_history(
