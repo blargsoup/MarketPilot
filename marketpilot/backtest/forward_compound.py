@@ -53,7 +53,7 @@ class ForwardCompounder:
         self,
         market: Dict[str, pd.DataFrame],
         states: pd.Series,
-        price_column: str = "Adj Close",
+        price_column: str = "Close",
     ) -> ForwardCompoundResult:
 
         if states.empty:
@@ -69,7 +69,7 @@ class ForwardCompounder:
                     "was not found in market data."
                 )
 
-            prices = market[symbol].data[price_column].astype(float)
+            prices = market[symbol].data["Close"].astype(float)
 
             returns[state] = prices.pct_change()
 
