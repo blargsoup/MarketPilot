@@ -69,7 +69,7 @@ class ForwardCompounder:
                     "was not found in market data."
                 )
 
-            prices = market[symbol][price_column].astype(float)
+            prices = market[symbol].data[price_column].astype(float)
 
             returns[state] = prices.pct_change()
 
