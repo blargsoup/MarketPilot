@@ -332,6 +332,37 @@ class ForwardCompounder:
             * (1.0 + selected_returns).cumprod()
         )
 
+        # ------------------------------------------------------------------
+        # Forward-return buy-and-hold benchmarks
+        #
+        # These benchmarks intentionally use the same forward return series
+        # as the strategy. This avoids comparing the forward-compounded
+        # strategy against the reconstructed historical share-price series.
+        # ------------------------------------------------------------------
+
+        benchmark_equity = {}
+
+        for state_name, return_series in returns.items():
+            benchmark_equity[state_name] = (
+                self.starting_value
+                * (1.0 + return_series.reindex(selected_returns.index).fillna(0.0)).cumprod()
+            )
+
+        # ------------------------------------------------------------------
+        # Benchmark summary
+        # ------------------------------------------------------------------
+
+        benchmark_results = {}
+
+        for state_name, equity_curve in benchmark_equity.items():
+            benchmark_results[state_name] = {
+                "ending_value": float(equity_curve.iloc[-1]),
+                "total_return": float(
+                    equity_curve.iloc[-1] / self.starting_value - 1.0
+                ),
+            }
+
+
         # --------------------------------------------------------------
         # Drawdown.
         # --------------------------------------------------------------

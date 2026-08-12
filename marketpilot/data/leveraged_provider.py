@@ -387,10 +387,30 @@ class LeveragedETFProvider:
         #
         # Synthetic leveraged daily return.
         #
+        # Modern U.S. equity markets have a 20% Level 1 circuit breaker.
+        # For the historical synthetic reconstruction, cap the underlying
+        # daily loss at -20% BEFORE applying leverage.
+        #
+        # This is important because TQQQ/QLD reset their leverage daily.
+        #
+        # Example:
+        #
+        #   QQQ daily return = -20%
+        #   QLD synthetic return ~= -40%
+        #   TQQQ synthetic return ~= -60%
+        #
+        # We intentionally do NOT cap the leveraged ETF at -20%.
+        #
+
+        MAX_UNDERLYING_DAILY_LOSS = -0.20
+
+        capped_underlying_return = underlying_return.clip(
+            lower=MAX_UNDERLYING_DAILY_LOSS
+        )
 
         leveraged_return = (
             self.leverage
-            * underlying_return
+            * capped_underlying_return
             - daily_financing
             - daily_expense
         )
@@ -398,9 +418,9 @@ class LeveragedETFProvider:
         #
         # A leveraged ETF cannot have a daily loss below -100%.
         #
-        # This also protects the reconstruction from producing
-        # zero/negative prices when an extreme underlying move
-        # occurs.
+        # This is a final mathematical safety check. Under the
+        # -20% underlying circuit-breaker assumption, normal 2x/3x
+        # leverage should never come close to this limit.
         #
 
         leveraged_return = leveraged_return.clip(
