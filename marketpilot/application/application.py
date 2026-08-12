@@ -231,14 +231,11 @@ class Application:
         logger.info("Forward Compounding Model")
         logger.info("------------------------------")
 
-        logger.info(
-            "Starting Value : $%,.2f",
-            forward_result.starting_value,
-        )
+        logger.info("Starting Value : $%s", f"{starting_value:,.2f}")
 
         logger.info(
-            "Ending Value   : $%,.2f",
-            forward_result.ending_value,
+            "Ending Value   : $%s",
+            f"{forward_result.ending_value:,.2f}",
         )
 
         logger.info(

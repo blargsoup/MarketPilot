@@ -72,10 +72,6 @@ class ForwardCompounder:
 
             prices = market[symbol].data[price_column].astype(float)
 
-            returns[state] = prices.pct_change()
-
-            prices = market[symbol].data[price_column].astype(float)
-
             asset_returns = prices.pct_change()
 
             returns[state] = asset_returns
