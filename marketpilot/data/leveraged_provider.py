@@ -21,6 +21,34 @@ import logging
 import pandas as pd
 logger = logging.getLogger(__name__)
 
+#
+# Historical synthetic TQQQ split factors.
+#
+# split = 2.0  -> 2-for-1 forward split
+# split = 0.25 -> 1-for-4 reverse split
+#
+# These affect share price only.
+# They have ZERO effect on portfolio wealth/NAV.
+#
+HISTORICAL_SPLITS = {
+    "2000-01-21": 0.25,
+    "2000-06-13": 2.0,
+    "2000-07-19": 2.0,
+    "2000-08-30": 2.0,
+    "2005-11-29": 0.25,
+    "2006-11-03": 2.0,
+    "2007-01-08": 2.0,
+    "2007-05-17": 2.0,
+    "2007-11-09": 2.0,
+    "2008-03-03": 2.0,
+    "2008-03-28": 2.0,
+    "2008-06-10": 2.0,
+    "2008-07-29": 2.0,
+    "2009-01-09": 2.0,
+    "2009-06-23": 0.25,
+    "2011-02-25": 2.0,
+}
+
 
 class LeveragedETFProvider:
 
@@ -429,60 +457,119 @@ class LeveragedETFProvider:
 
         #
         # ----------------------------------------------------------
-        # Build the synthetic history FORWARD.
+        # Build split-aware synthetic NAV and share price.
         # ----------------------------------------------------------
         #
-        # We first create a normalized synthetic series beginning
-        # at 1.0.
+        # IMPORTANT:
         #
-        # This is much safer than recursively working backwards
-        # from the real ETF price.
+        # The leveraged daily return calculation above is the
+        # authoritative portfolio wealth calculation.
+        #
+        # Splits must NEVER modify that wealth calculation.
+        #
+        # We therefore maintain two separate concepts:
+        #
+        #   1. synthetic_nav
+        #      True compounded portfolio wealth.
+        #
+        #   2. synthetic_price
+        #      A share-price representation of that wealth.
+        #
+        # A split changes the number of shares and the share price,
+        # but leaves NAV/wealth unchanged.
+        #
+        # This separation prevents historical splits from corrupting
+        # the actual backtest return.
         #
 
-        synthetic_normalized = (
+        synthetic_nav = (
             (1.0 + leveraged_return)
             .cumprod()
         )
 
-        #
-        # The last synthetic value before inception becomes the
-        # anchor point for the real ETF.
-        #
-
-        if synthetic_normalized.empty:
+        if synthetic_nav.empty:
             return actual_df
 
-        synthetic_last = float(
-            synthetic_normalized.iloc[-1]
+        #
+        # ----------------------------------------------------------
+        # Build split-aware share price.
+        # ----------------------------------------------------------
+        #
+        # We use a normalized share-price series rather than scaling
+        # the synthetic NAV to the first real ETF price.
+        #
+        # This is intentional.
+        #
+        # The pre-inception synthetic NAV can become extremely small
+        # during periods such as the dot-com collapse. Scaling that
+        # tiny NAV to the first real TQQQ price creates astronomical
+        # historical prices.
+        #
+        # The share-price layer is therefore independent of that
+        # arbitrary handoff scale.
+        #
+
+        SYNTHETIC_START_PRICE = 100.0
+
+        synthetic_price = pd.Series(
+            index=synthetic_nav.index,
+            dtype=float,
         )
 
-        actual_first_close = float(
-            actual_df["Close"].iloc[0]
-        )
+        current_price = SYNTHETIC_START_PRICE
 
-        if (
-            not math.isfinite(actual_first_close)
-            or actual_first_close <= 0
-        ):
-            raise ValueError(
-                f"Invalid first actual {symbol} close: "
-                f"{actual_first_close}"
+        for date in synthetic_nav.index:
+
+            daily_return = float(
+                leveraged_return.loc[date]
             )
 
-        #
-        # Scale the entire synthetic series so that its final
-        # pre-inception value matches the first actual ETF close.
-        #
+            #
+            # First apply the actual investment return.
+            #
+            current_price *= (1.0 + daily_return)
 
-        scale_factor = (
-            actual_first_close
-            / synthetic_last
-        )
+            #
+            # Then apply any historical split occurring on
+            # this date.
+            #
+            split_factor = HISTORICAL_SPLITS.get(
+                date.strftime("%Y-%m-%d"),
+                1.0,
+            )
 
-        synthetic_values = (
-            synthetic_normalized
-            * scale_factor
-        )
+            if split_factor <= 0:
+                raise ValueError(
+                    f"Invalid split factor "
+                    f"{split_factor} on {date}."
+                )
+
+            #
+            # A 2-for-1 split:
+            #
+            #   price -> price / 2
+            #   shares -> shares * 2
+            #
+            # A 1-for-4 reverse split:
+            #
+            #   price -> price / 0.25
+            #   shares -> shares * 0.25
+            #
+            # In both cases portfolio wealth is unchanged.
+            #
+            if split_factor != 1.0:
+                current_price /= split_factor
+
+                logger.debug(
+                    "Synthetic %s split on %s: "
+                    "factor=%.4f price=%.6f",
+                    symbol,
+                    date.date(),
+                    split_factor,
+                    current_price,
+                )
+
+            synthetic_price.loc[date] = current_price
 
         #
         # ----------------------------------------------------------
@@ -491,15 +578,37 @@ class LeveragedETFProvider:
         #
 
         synthetic_df = pd.DataFrame(
-            index=synthetic_values.index
+            index=synthetic_price.index
         )
 
-        synthetic_df["Open"] = synthetic_values
-        synthetic_df["High"] = synthetic_values
-        synthetic_df["Low"] = synthetic_values
-        synthetic_df["Close"] = synthetic_values
-        synthetic_df["Adj Close"] = synthetic_values
+        synthetic_df["Open"] = synthetic_price
+        synthetic_df["High"] = synthetic_price
+        synthetic_df["Low"] = synthetic_price
+        synthetic_df["Close"] = synthetic_price
+
+        #
+        # For the synthetic pre-inception history, the synthetic
+        # Close is our authoritative price representation.
+        #
+        synthetic_df["Adj Close"] = synthetic_price
+
         synthetic_df["Volume"] = 0
+
+        #
+        # Keep the actual compounded wealth available for diagnostics.
+        #
+        synthetic_df["Synthetic NAV"] = synthetic_nav
+
+        #
+        # Keep the split factor visible in the resulting data.
+        #
+        synthetic_df["Split"] = [
+            HISTORICAL_SPLITS.get(
+                date.strftime("%Y-%m-%d"),
+                1.0,
+            )
+            for date in synthetic_price.index
+        ]
 
         #
         # ----------------------------------------------------------
@@ -537,31 +646,6 @@ class LeveragedETFProvider:
         )
 
         #
-        # The synthetic series should end very close to the
-        # first actual close.
-        #
-        # They may differ slightly because the actual ETF's first
-        # trading day is not itself included in the synthetic
-        # series.
-        #
-
-        handoff_ratio = (
-            actual_first_close
-            / last_synthetic_close
-        )
-
-        if not (
-            0.95
-            <= handoff_ratio
-            <= 1.05
-        ):
-            raise ValueError(
-                f"{symbol} synthetic/actual handoff is "
-                f"outside tolerance: "
-                f"{handoff_ratio:.4f}"
-            )
-
-        #
         # Combine synthetic history with actual history.
         #
 
@@ -585,7 +669,7 @@ class LeveragedETFProvider:
             .sort_index()
         )
 
-########
+
         logger.info(
             f"{symbol} history validation: "
             f"{len(combined)} rows, "
