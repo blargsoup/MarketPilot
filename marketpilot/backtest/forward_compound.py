@@ -25,6 +25,10 @@ class ForwardCompoundResult:
     moderate_days: int
     defensive_days: int
 
+    benchmark_equity: Dict[str, pd.Series]
+    benchmark_ending_values: Dict[str, float]
+    benchmark_total_returns: Dict[str, float]
+
 
 class ForwardCompounder:
     """
@@ -333,6 +337,44 @@ class ForwardCompounder:
         )
 
         # --------------------------------------------------------------
+        # Forward-return buy-and-hold benchmarks.
+        #
+        # These use the exact same daily return series as the strategy,
+        # but remain invested in one asset for the entire simulation.
+        # --------------------------------------------------------------
+
+        benchmark_equity: Dict[str, pd.Series] = {}
+        benchmark_ending_values: Dict[str, float] = {}
+        benchmark_total_returns: Dict[str, float] = {}
+
+        for state_name, return_series in returns.items():
+            benchmark_returns = (
+                return_series
+                .reindex(selected_returns.index)
+            )
+
+            # The first day has no prior-day return.
+            benchmark_returns = benchmark_returns.fillna(0.0)
+
+            benchmark_curve = (
+                self.starting_value
+                * (1.0 + benchmark_returns).cumprod()
+            )
+
+            benchmark_equity[state_name] = benchmark_curve
+
+            benchmark_ending_values[state_name] = float(
+                benchmark_curve.iloc[-1]
+            )
+
+            benchmark_total_returns[state_name] = float(
+                benchmark_curve.iloc[-1]
+                / self.starting_value
+                - 1.0
+            )
+
+
+        # --------------------------------------------------------------
         # Drawdown.
         # --------------------------------------------------------------
 
@@ -403,32 +445,24 @@ class ForwardCompounder:
         # --------------------------------------------------------------
 
         return ForwardCompoundResult(
-
             equity=equity,
-
             daily_returns=selected_returns,
-
             states=held_state,
-
             starting_value=self.starting_value,
-
             ending_value=float(
                 equity.iloc[-1]
             ),
-
             total_return=float(
                 equity.iloc[-1]
                 / self.starting_value
                 - 1.0
             ),
-
             cagr=cagr,
-
             max_drawdown=max_drawdown,
-
             aggressive_days=aggressive_days,
-
             moderate_days=moderate_days,
-
             defensive_days=defensive_days,
+            benchmark_equity=benchmark_equity,
+            benchmark_ending_values=benchmark_ending_values,
+            benchmark_total_returns=benchmark_total_returns,
         )
