@@ -303,7 +303,17 @@ class Application:
 
         )
 
-        benchmark_symbols = ["QQQ", "TQQQ", "SPY", "UPRO", "AVUV"]
+        # ------------------------------------------------------------
+        # Benchmark calculations
+        #
+        # Use the existing benchmark engine for non-leveraged assets.
+        # Leveraged ETFs are handled separately because their historical
+        # performance must be modeled using daily leveraged returns rather
+        # than reconstructed historical prices.
+        # ------------------------------------------------------------
+
+        benchmark_symbols = ["QQQ", "SPY", "AVUV"]
+
         backtest_result.benchmarks = BenchmarkRunner().run(
             market,
             benchmark_symbols,
