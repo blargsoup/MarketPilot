@@ -144,35 +144,6 @@ class LeveragedSplitManager:
         if symbol == "TQQQ":
             return cls.load_tqqq_schedule()
 
-        if symbol == "QLD":
-
-            tqqq_schedule = cls.load_tqqq_schedule()
-
-            qld_schedule = {
-                date: factor
-                for date, factor
-                in tqqq_schedule.items()
-                if date < cls.QLD_INCEPTION
-            }
-
-            logger.info(
-                "QLD diagnostic split schedule: "
-                "using pre-inception TQQQ splits"
-            )
-
-            for date, factor in qld_schedule.items():
-                logger.info(
-                    f"    QLD synthetic split "
-                    f"{date.date()} : {factor:g}"
-                )
-
-            logger.info(
-                "QLD diagnostic split events: "
-                f"{len(qld_schedule)}"
-            )
-
-            return qld_schedule
-
         return {}
 
     @classmethod
