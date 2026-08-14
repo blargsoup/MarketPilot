@@ -1,33 +1,35 @@
 """
 Synthetic leveraged ETF provider.
 
-Creates a continuous historical series for leveraged ETFs by:
+This module builds continuous historical leveraged ETF series by combining:
 
-1. Using the real ETF history from its inception onward.
-2. Reconstructing a synthetic pre-inception history using:
-   - The underlying ETF's daily total return
-   - Daily leverage
-   - Daily financing cost
-   - ETF expense ratio
-3. Maintaining a separate synthetic economic NAV/wealth layer.
-4. Maintaining a split-aware synthetic share-price layer.
+    1. Real ETF history from inception onward.
+    2. Synthetic pre-inception history.
+    3. A separate economic NAV / wealth layer.
+    4. A separate quoted synthetic share-price layer.
+    5. Historical split events.
 
 IMPORTANT:
 
-The synthetic NAV represents economic portfolio wealth.
+Historical splits NEVER change economic NAV.
 
-Historical stock splits affect the quoted share price and share count,
-but they NEVER affect NAV or portfolio wealth.
+A split changes:
 
-For TQQQ, the historical split schedule is loaded from:
+    - share count
+    - quoted share price
 
-    cache/simulatedTQQQ.csv
+A split does NOT change:
 
-The CSV's `split` column is authoritative.
+    - portfolio wealth
+    - economic NAV
+    - investment return
+
+For TQQQ, the repository's simulatedTQQQ.csv is the authoritative
+historical synthetic price/reference series.
+
+The CSV also contains the historical split schedule.
 
 No artificial price-band denomination splits are generated.
-
-This module is intended for historical research/backtesting.
 """
 
 from __future__ import annotations
@@ -43,6 +45,7 @@ logger = logging.getLogger(__name__)
 
 
 class LeveragedETFProvider:
+
     def __init__(
         self,
         underlying_provider,
@@ -56,23 +59,21 @@ class LeveragedETFProvider:
         self.expense_ratio = expense_ratio
 
     # ==================================================================
-    # Historical split schedule
+    # Paths
     # ==================================================================
 
     @staticmethod
     def _split_schedule_path() -> Path:
         """
-        Return the repository-level simulated TQQQ CSV path.
+        Repository-level simulated TQQQ CSV.
 
-        leveraged_provider.py lives at:
+        <repo>/
+            cache/
+                simulatedTQQQ.csv
 
-            <repo>/marketpilot/data/leveraged_provider.py
-
-        Therefore:
-
-            parents[0] = data
-            parents[1] = marketpilot
-            parents[2] = repo
+            marketpilot/
+                data/
+                    leveraged_provider.py
         """
 
         return (
@@ -81,62 +82,48 @@ class LeveragedETFProvider:
             / "simulatedTQQQ.csv"
         )
 
+    # ==================================================================
+    # Historical TQQQ CSV
+    # ==================================================================
+
     @classmethod
-    def _load_csv_split_schedule(
+    def _load_simulated_tqqq(
         cls,
-        symbol: str,
-    ) -> dict[pd.Timestamp, float]:
+    ) -> pd.DataFrame:
         """
-        Load historical split factors from the simulated TQQQ CSV.
+        Load the repository's simulated TQQQ data.
 
-        The CSV uses:
+        This file is treated as the historical reference for the
+        pre-inception TQQQ path.
 
-            split = 2.0   -> 2-for-1 forward split
-            split = 0.25  -> 1-for-4 reverse split
-            split = 1.0   -> no split
-
-        Splits affect quoted share price only.
-
-        They do NOT affect economic NAV.
-
-        At present the repository contains the authoritative historical
-        split schedule for TQQQ in simulatedTQQQ.csv.
-
-        If the requested symbol is not TQQQ, no CSV schedule is applied.
+        The split column is metadata describing share-count events.
         """
-
-        symbol = symbol.upper()
-
-        if symbol != "TQQQ":
-            return {}
 
         path = cls._split_schedule_path()
 
         if not path.exists():
             raise FileNotFoundError(
-                "Historical TQQQ split schedule was not found at:\n"
+                "Historical TQQQ simulation file was not found:\n"
                 f"    {path}\n"
                 "\n"
-                "Expected file:\n"
+                "Expected:\n"
                 "    cache/simulatedTQQQ.csv"
             )
 
-        try:
-            df = pd.read_csv(path)
-        except Exception as exc:
-            raise RuntimeError(
-                "Unable to read the historical TQQQ split schedule:\n"
-                f"    {path}"
-            ) from exc
+        df = pd.read_csv(path)
 
-        required = {"date", "split"}
+        required = {
+            "date",
+            "close",
+            "split",
+        }
 
         missing = required.difference(df.columns)
 
         if missing:
             raise ValueError(
-                "Historical TQQQ split CSV is missing required "
-                f"columns: {sorted(missing)}"
+                "simulatedTQQQ.csv is missing required columns: "
+                f"{sorted(missing)}"
             )
 
         df["date"] = pd.to_datetime(
@@ -144,38 +131,100 @@ class LeveragedETFProvider:
             errors="coerce",
         )
 
-        df["split"] = pd.to_numeric(
-            df["split"],
+        df["close"] = pd.to_numeric(
+            df["close"],
             errors="coerce",
         )
 
+        df["split"] = pd.to_numeric(
+            df["split"],
+            errors="coerce",
+        ).fillna(1.0)
+
         df = df.dropna(
-            subset=["date", "split"]
+            subset=[
+                "date",
+                "close",
+            ]
         )
 
         df = df[
-            df["split"] > 0
+            df["close"] > 0
         ]
 
-        df = df[
-            df["split"] != 1.0
-        ]
+        df["split"] = df["split"].where(
+            df["split"] > 0,
+            1.0,
+        )
 
-        df = df.sort_values("date")
+        df = (
+            df.sort_values("date")
+            .drop_duplicates(
+                subset=["date"],
+                keep="last",
+            )
+        )
+
+        df = df.set_index("date")
+
+        logger.info(
+            "Loaded simulated TQQQ reference: "
+            f"{len(df)} rows, "
+            f"{df.index.min().date()} -> "
+            f"{df.index.max().date()}"
+        )
+
+        return df
+
+    # ==================================================================
+    # Historical split schedule
+    # ==================================================================
+
+    @classmethod
+    def _load_csv_split_schedule(
+        cls,
+        symbol: str,
+    ) -> dict[pd.Timestamp, float]:
+        """
+        Load historical split factors.
+
+        CSV semantics:
+
+            2.0   = 2-for-1 forward split
+            3.0   = 3-for-1 forward split
+            0.25  = 1-for-4 reverse split
+
+        Splits affect quoted price/share count only.
+
+        They NEVER modify economic NAV.
+        """
+
+        symbol = symbol.upper()
+
+        if symbol != "TQQQ":
+            return {}
+
+        df = cls._load_simulated_tqqq()
 
         schedule: dict[pd.Timestamp, float] = {}
 
-        for row in df.itertuples(index=False):
-            date = pd.Timestamp(row.date)
-            factor = float(row.split)
+        for date, row in df.iterrows():
+
+            factor = float(
+                row["split"]
+            )
 
             if (
                 not math.isfinite(factor)
                 or factor <= 0
+                or math.isclose(
+                    factor,
+                    1.0,
+                )
             ):
                 continue
 
-            schedule[date] = factor
+            schedule[pd.Timestamp(date)] = factor
 
         logger.info(
             f"{symbol} historical split schedule loaded: "
@@ -194,64 +243,40 @@ class LeveragedETFProvider:
         cls,
         symbol: str,
     ) -> dict[pd.Timestamp, float]:
-        """
-        Backwards-compatible wrapper around the CSV-based schedule.
-
-        The historical split schedule is intentionally NOT hard-coded.
-
-        The repository CSV is the source of truth.
-        """
-
-        return cls._load_csv_split_schedule(symbol)
+        return cls._load_csv_split_schedule(
+            symbol
+        )
 
     # ==================================================================
-    # Split normalization
+    # Split series
     # ==================================================================
 
-    @staticmethod
-    def _extract_split_series(
-        df: pd.DataFrame,
+    @classmethod
+    def _build_split_series(
+        cls,
+        symbol: str,
+        index: pd.DatetimeIndex,
     ) -> pd.Series:
         """
-        Extract a split series from a dataframe.
-
-        Supports common Yahoo/yfinance names as well as the CSV naming
-        convention used by simulatedTQQQ.csv.
+        Create a split series aligned to the supplied dates.
         """
 
-        candidates = [
-            "Stock Splits",
-            "Split",
-            "split",
-            "stock_splits",
-        ]
-
-        for column in candidates:
-            if column not in df.columns:
-                continue
-
-            splits = pd.to_numeric(
-                df[column],
-                errors="coerce",
-            ).fillna(1.0)
-
-            splits = splits.replace(
-                [float("inf"), float("-inf")],
-                1.0,
-            )
-
-            splits = splits.where(
-                splits > 0,
-                1.0,
-            )
-
-            return splits
-
-        return pd.Series(
+        splits = pd.Series(
             1.0,
-            index=df.index,
+            index=index,
             dtype=float,
         )
+
+        schedule = cls._historical_split_factors(
+            symbol
+        )
+
+        for date, factor in schedule.items():
+
+            if date in splits.index:
+                splits.loc[date] = factor
+
+        return splits
 
     # ==================================================================
     # Validation
@@ -262,16 +287,13 @@ class LeveragedETFProvider:
         df: pd.DataFrame,
         symbol: str,
     ) -> None:
-        """
-        Validate a completed leveraged ETF history.
-        """
 
         if df is None or df.empty:
             raise ValueError(
                 f"{symbol}: history is empty"
             )
 
-        required_columns = [
+        required = [
             "Open",
             "High",
             "Low",
@@ -281,7 +303,7 @@ class LeveragedETFProvider:
 
         missing = [
             column
-            for column in required_columns
+            for column in required
             if column not in df.columns
         ]
 
@@ -295,7 +317,7 @@ class LeveragedETFProvider:
             pd.DatetimeIndex,
         ):
             raise ValueError(
-                f"{symbol}: index must be a DatetimeIndex"
+                f"{symbol}: index must be DatetimeIndex"
             )
 
         if df.index.has_duplicates:
@@ -308,61 +330,233 @@ class LeveragedETFProvider:
                 f"{symbol}: dates are not sorted"
             )
 
-        prices = df[required_columns]
+        prices = df[required]
 
         if prices.isna().any().any():
-            nan_summary = (
-                prices.isna()
-                .sum()
-                .loc[lambda x: x > 0]
-                .to_dict()
-            )
-
-            nan_rows = prices[
-                prices.isna().any(axis=1)
-            ]
-
-            first_nan_date = nan_rows.index.min()
-            last_nan_date = nan_rows.index.max()
-
             raise ValueError(
-                f"{symbol}: NaN prices detected. "
-                f"Columns: {nan_summary}. "
-                f"First date: {first_nan_date}. "
-                f"Last date: {last_nan_date}. "
-                f"Rows affected: {len(nan_rows)}"
+                f"{symbol}: NaN prices detected"
             )
 
-        if not prices.apply(
-            lambda column: pd.Series(
-                pd.notna(column)
-                & (column != float("inf"))
-                & (column != float("-inf")),
-                index=column.index,
-            ).all()
-        ).all():
-            raise ValueError(
-                f"{symbol}: infinite prices detected"
-            )
+        for column in required:
 
-        for column in required_columns:
-            if (df[column] <= 0).any():
-                bad_date = df.index[
-                    df[column] <= 0
+            if (
+                ~prices[column].apply(
+                    math.isfinite
+                )
+            ).any():
+                raise ValueError(
+                    f"{symbol}: infinite {column} values"
+                )
+
+            if (
+                prices[column] <= 0
+            ).any():
+                bad_date = prices.index[
+                    prices[column] <= 0
                 ][0]
 
-                bad_value = df.loc[
-                    bad_date,
-                    column,
-                ]
-
                 raise ValueError(
-                    f"{symbol}: non-positive {column} "
-                    f"value {bad_value} on {bad_date}"
+                    f"{symbol}: non-positive "
+                    f"{column} on {bad_date}"
                 )
 
     # ==================================================================
-    # Synthetic share-price layer
+    # Build synthetic TQQQ from repository reference
+    # ==================================================================
+
+    @classmethod
+    def _build_tqqq_reference_history(
+        cls,
+        symbol: str,
+        actual_start: pd.Timestamp,
+        actual_first_close: float,
+    ):
+        """
+        Build the pre-inception TQQQ history from the repository's
+        simulated TQQQ reference.
+
+        The CSV is the authoritative historical simulation used to
+        prevent the synthetic TQQQ from collapsing numerically due to
+        differences between the local QQQ series and the historical
+        reconstruction.
+
+        NAV is derived from the synthetic price relative to the
+        inception handoff.
+
+        Splits do not alter NAV.
+        """
+
+        if symbol.upper() != "TQQQ":
+            return None
+
+        reference = cls._load_simulated_tqqq()
+
+        reference = reference[
+            reference.index < actual_start
+        ].copy()
+
+        if reference.empty:
+            return None
+
+        reference_close = (
+            reference["close"]
+            .astype(float)
+        )
+
+        if (
+            not reference_close.notna().all()
+            or (reference_close <= 0).any()
+        ):
+            raise ValueError(
+                "Invalid values found in simulatedTQQQ.csv"
+            )
+
+        # --------------------------------------------------------------
+        # The CSV's historical price is already a continuous simulated
+        # price series.
+        #
+        # We normalize it to the real ETF's first closing price.
+        #
+        # This is a PRICE operation only.
+        # --------------------------------------------------------------
+
+        synthetic_last = float(
+            reference_close.iloc[-1]
+        )
+
+        if (
+            not math.isfinite(synthetic_last)
+            or synthetic_last <= 0
+        ):
+            raise ValueError(
+                "Invalid final simulated TQQQ reference price"
+            )
+
+        price_scale = (
+            actual_first_close
+            / synthetic_last
+        )
+
+        synthetic_price = (
+            reference_close
+            * price_scale
+        )
+
+        # --------------------------------------------------------------
+        # Economic NAV.
+        #
+        # NAV is relative to the actual ETF inception handoff.
+        #
+        # At the last synthetic date, NAV is exactly 1.0.
+        #
+        # Therefore an investment of $100,000 held through the synthetic
+        # period has wealth:
+        #
+        #     100000 * NAV
+        #
+        # immediately before the real ETF begins.
+        # --------------------------------------------------------------
+
+        synthetic_nav = (
+            reference_close
+            / synthetic_last
+        )
+
+        # --------------------------------------------------------------
+        # Historical split metadata.
+        # --------------------------------------------------------------
+
+        split_series = (
+            reference["split"]
+            .astype(float)
+        )
+
+        cumulative_split = (
+            split_series
+            .cumprod()
+        )
+
+        return (
+            synthetic_price,
+            synthetic_nav,
+            split_series,
+            cumulative_split,
+        )
+
+    # ==================================================================
+    # Generic synthetic NAV builder
+    # ==================================================================
+
+    def _build_generic_synthetic_nav(
+        self,
+        underlying_close: pd.Series,
+        treasury_rate: pd.Series,
+    ):
+        """
+        Existing daily leveraged-return calculation.
+
+        This remains the generic engine for leveraged ETFs that do not
+        have a repository-specific historical reference.
+
+        Economic NAV is independent from splits.
+        """
+
+        underlying_return = (
+            underlying_close
+            .pct_change()
+            .dropna()
+        )
+
+        financing_rate = (
+            treasury_rate
+            .reindex(
+                underlying_return.index
+            )
+            .ffill()
+            .bfill()
+        )
+
+        daily_expense = (
+            self.expense_ratio
+            / 252.0
+        )
+
+        daily_financing = (
+            (self.leverage - 1.0)
+            * financing_rate
+            / 252.0
+        )
+
+        leveraged_return = (
+            self.leverage
+            * underlying_return
+            - daily_financing
+            - daily_expense
+        )
+
+        # Never allow a mathematical return <= -100%.
+        #
+        # This is only a mathematical protection. It is NOT a split.
+        leveraged_return = (
+            leveraged_return
+            .clip(
+                lower=-0.999999
+            )
+        )
+
+        nav = (
+            1.0
+            * (1.0 + leveraged_return)
+            .cumprod()
+        )
+
+        return (
+            nav,
+            leveraged_return,
+        )
+
+    # ==================================================================
+    # Generic split-aware price layer
     # ==================================================================
 
     @staticmethod
@@ -370,45 +564,32 @@ class LeveragedETFProvider:
         nav: pd.Series,
         historical_splits: pd.Series,
         target_price: float,
-    ) -> tuple[pd.Series, pd.Series, pd.Series]:
+    ):
         """
-        Convert economic NAV into a split-aware synthetic share price.
+        Convert economic NAV into a quoted share price.
 
-        NAV is NEVER modified.
+        NAV is never modified.
 
-        The model maintains a synthetic share count.
+        Starting share count is chosen so the first synthetic price
+        equals target_price.
 
-        Price:
+        Forward split:
 
-            price = NAV / shares
+            shares *= split
+            price  /= split
 
-        On a forward split:
-
-            shares *= split_factor
-
-        Therefore:
-
-            price /= split_factor
-
-        On a reverse split:
+        Reverse split:
 
             shares *= 0.25
+            price  /= 0.25
 
         Therefore:
 
-            price *= 4
+            shares * price == NAV
 
-        Total wealth remains:
+        at every point in the series.
 
-            shares * price = NAV
-
-        There are NO artificial price-band splits here.
-
-        Returns:
-
-            synthetic_price
-            applied_split
-            cumulative_split_factor
+        There are NO artificial denomination splits.
         """
 
         if nav.empty:
@@ -440,7 +621,7 @@ class LeveragedETFProvider:
             or first_nav <= 0
         ):
             raise ValueError(
-                "Synthetic NAV begins with an invalid value: "
+                f"Invalid first synthetic NAV: "
                 f"{first_nav}"
             )
 
@@ -449,22 +630,14 @@ class LeveragedETFProvider:
             or target_price <= 0
         ):
             raise ValueError(
-                f"Invalid synthetic target price: {target_price}"
+                f"Invalid target price: "
+                f"{target_price}"
             )
 
-        # Start with a share count that makes the first quoted
-        # synthetic price equal to target_price.
         shares = (
-            first_nav / target_price
+            first_nav
+            / target_price
         )
-
-        if (
-            not math.isfinite(shares)
-            or shares <= 0
-        ):
-            raise ValueError(
-                f"Invalid initial synthetic share count: {shares}"
-            )
 
         prices = []
         applied_splits = []
@@ -478,10 +651,13 @@ class LeveragedETFProvider:
                 nav.loc[date]
             )
 
-            if not math.isfinite(nav_value):
+            if (
+                not math.isfinite(nav_value)
+                or nav_value <= 0
+            ):
                 raise ValueError(
-                    f"Synthetic NAV became non-finite "
-                    f"on {date}: {nav_value}"
+                    f"Invalid NAV on {date}: "
+                    f"{nav_value}"
                 )
 
             split_factor = float(
@@ -489,18 +665,12 @@ class LeveragedETFProvider:
             )
 
             if (
-                not math.isfinite(split_factor)
+                not math.isfinite(
+                    split_factor
+                )
                 or split_factor <= 0
             ):
                 split_factor = 1.0
-
-            # ----------------------------------------------------------
-            # Historical split.
-            #
-            # THIS IS THE ONLY SHARE-COUNT ADJUSTMENT.
-            #
-            # NAV is untouched.
-            # ----------------------------------------------------------
 
             if not math.isclose(
                 split_factor,
@@ -509,21 +679,9 @@ class LeveragedETFProvider:
                 shares *= split_factor
                 cumulative_split *= split_factor
 
-            # ----------------------------------------------------------
-            # Calculate quoted synthetic price.
-            # ----------------------------------------------------------
-
-            if (
-                not math.isfinite(shares)
-                or shares <= 0
-            ):
-                raise ValueError(
-                    f"Invalid synthetic share count on {date}: "
-                    f"{shares}"
-                )
-
             price = (
-                nav_value / shares
+                nav_value
+                / shares
             )
 
             if (
@@ -531,37 +689,34 @@ class LeveragedETFProvider:
                 or price <= 0
             ):
                 raise ValueError(
-                    f"Synthetic price became invalid on {date}: "
-                    f"NAV={nav_value}, shares={shares}, "
-                    f"price={price}"
+                    f"Invalid synthetic price on "
+                    f"{date}: {price}"
                 )
 
             prices.append(price)
-            applied_splits.append(split_factor)
-            cumulative_splits.append(cumulative_split)
-
-        synthetic_price = pd.Series(
-            prices,
-            index=nav.index,
-            dtype=float,
-        )
-
-        applied_split_series = pd.Series(
-            applied_splits,
-            index=nav.index,
-            dtype=float,
-        )
-
-        cumulative_split_series = pd.Series(
-            cumulative_splits,
-            index=nav.index,
-            dtype=float,
-        )
+            applied_splits.append(
+                split_factor
+            )
+            cumulative_splits.append(
+                cumulative_split
+            )
 
         return (
-            synthetic_price,
-            applied_split_series,
-            cumulative_split_series,
+            pd.Series(
+                prices,
+                index=nav.index,
+                dtype=float,
+            ),
+            pd.Series(
+                applied_splits,
+                index=nav.index,
+                dtype=float,
+            ),
+            pd.Series(
+                cumulative_splits,
+                index=nav.index,
+                dtype=float,
+            ),
         )
 
     # ==================================================================
@@ -580,8 +735,10 @@ class LeveragedETFProvider:
         Build the complete leveraged ETF history.
         """
 
+        symbol = symbol.upper()
+
         # --------------------------------------------------------------
-        # Underlying history
+        # Load underlying.
         # --------------------------------------------------------------
 
         underlying = (
@@ -593,7 +750,7 @@ class LeveragedETFProvider:
         )
 
         # --------------------------------------------------------------
-        # Treasury history
+        # Load treasury.
         # --------------------------------------------------------------
 
         treasury = (
@@ -609,7 +766,7 @@ class LeveragedETFProvider:
         treasury_df = treasury.copy()
 
         # --------------------------------------------------------------
-        # Normalize indexes
+        # Normalize indexes.
         # --------------------------------------------------------------
 
         underlying_df.index = pd.to_datetime(
@@ -640,46 +797,316 @@ class LeveragedETFProvider:
         )
 
         # --------------------------------------------------------------
-        # Normalize actual Adj Close
+        # Actual ETF inception.
         # --------------------------------------------------------------
 
+        actual_start = (
+            actual_df.index.min()
+        )
+
+        actual_first_close = float(
+            actual_df["Close"].iloc[0]
+        )
+
         if (
-            "Adj Close" not in actual_df.columns
-            or actual_df["Adj Close"].isna().all()
+            not math.isfinite(
+                actual_first_close
+            )
+            or actual_first_close <= 0
         ):
-            actual_df["Adj Close"] = (
-                actual_df["Close"]
+            raise ValueError(
+                f"Invalid first actual {symbol} "
+                f"close: {actual_first_close}"
             )
 
         # --------------------------------------------------------------
-        # Determine actual ETF inception.
+        # Underlying pre-inception history.
         # --------------------------------------------------------------
 
-        actual_start = actual_df.index.min()
-
-        # --------------------------------------------------------------
-        # Only synthesize the period before the real ETF existed.
-        # --------------------------------------------------------------
-
-        synthetic_underlying = underlying_df[
-            underlying_df.index < actual_start
-        ].copy()
+        synthetic_underlying = (
+            underlying_df[
+                underlying_df.index < actual_start
+            ].copy()
+        )
 
         if synthetic_underlying.empty:
             return actual_df
 
         # --------------------------------------------------------------
-        # Underlying total-return price.
+        # TQQQ special historical reference.
+        #
+        # This is the critical fix.
+        #
+        # The repository already contains the simulated TQQQ path.
+        # Use that path rather than allowing the generic QQQ-based NAV
+        # calculation to collapse to ~1e-148.
         # --------------------------------------------------------------
 
-        if "Adj Close" in synthetic_underlying.columns:
+        if symbol == "TQQQ":
+
+            result = (
+                self._build_tqqq_reference_history(
+                    symbol=symbol,
+                    actual_start=actual_start,
+                    actual_first_close=actual_first_close,
+                )
+            )
+
+            if result is not None:
+
+                (
+                    synthetic_price,
+                    synthetic_nav,
+                    applied_splits,
+                    cumulative_splits,
+                ) = result
+
+                synthetic_df = pd.DataFrame(
+                    index=synthetic_price.index
+                )
+
+                synthetic_df["Open"] = (
+                    synthetic_price
+                )
+
+                synthetic_df["High"] = (
+                    synthetic_price
+                )
+
+                synthetic_df["Low"] = (
+                    synthetic_price
+                )
+
+                synthetic_df["Close"] = (
+                    synthetic_price
+                )
+
+                synthetic_df["Adj Close"] = (
+                    synthetic_price
+                )
+
+                synthetic_df["NAV"] = (
+                    synthetic_nav
+                )
+
+                synthetic_df["Split"] = (
+                    applied_splits
+                )
+
+                synthetic_df[
+                    "Cumulative Split"
+                ] = cumulative_splits
+
+                synthetic_df["Volume"] = 0
+
+                # ------------------------------------------------------
+                # Diagnostics.
+                # ------------------------------------------------------
+
+                first_nav = float(
+                    synthetic_nav.iloc[0]
+                )
+
+                last_nav = float(
+                    synthetic_nav.iloc[-1]
+                )
+
+                min_nav = float(
+                    synthetic_nav.min()
+                )
+
+                first_price = float(
+                    synthetic_price.iloc[0]
+                )
+
+                last_price = float(
+                    synthetic_price.iloc[-1]
+                )
+
+                min_price = float(
+                    synthetic_price.min()
+                )
+
+                max_price = float(
+                    synthetic_price.max()
+                )
+
+                split_count = int(
+                    (
+                        applied_splits
+                        != 1.0
+                    ).sum()
+                )
+
+                cumulative_split = float(
+                    cumulative_splits.iloc[-1]
+                )
+
+                logger.info(
+                    "TQQQ synthetic reference model"
+                )
+
+                print(
+                    "Synthetic TQQQ:"
+                )
+
+                print(
+                    f"    Synthetic last : "
+                    f"{synthetic_price.index[-1].date()} "
+                    f"${last_price:.6f}"
+                )
+
+                print(
+                    f"    Actual first   : "
+                    f"{actual_start.date()} "
+                    f"${actual_first_close:.6f}"
+                )
+
+                print(f"    Price ratio    : {actual_first_close / float(result[0].iloc[-1]):.4f}")
+
+                print(
+                    f"    Synthetic first: "
+                    f"{synthetic_price.index[0].date()} "
+                    f"${first_price:.6f}"
+                )
+
+                print(
+                    f"    Synthetic min  : "
+                    f"${min_price:.12f}"
+                )
+
+                print(
+                    f"    Synthetic max  : "
+                    f"${max_price:.6f}"
+                )
+
+                print(
+                    f"    Synthetic NAV first : "
+                    f"{first_nav:.12g}"
+                )
+
+                print(
+                    f"    Synthetic NAV last  : "
+                    f"{last_nav:.12g}"
+                )
+
+                print(
+                    f"    Synthetic NAV min   : "
+                    f"{min_nav:.12g}"
+                )
+
+                print(
+                    f"    Synthetic splits : "
+                    f"{split_count}"
+                )
+
+                print(
+                    f"    Cumulative split factor : "
+                    f"{cumulative_split:.12g}"
+                )
+
+                # ------------------------------------------------------
+                # Combine.
+                # ------------------------------------------------------
+
+                combined = pd.concat(
+                    [
+                        synthetic_df,
+                        actual_df,
+                    ]
+                )
+
+                combined = (
+                    combined[
+                        ~combined.index.duplicated(
+                            keep="last"
+                        )
+                    ]
+                    .sort_index()
+                )
+
+                self.validate_history(
+                    combined[
+                        [
+                            "Open",
+                            "High",
+                            "Low",
+                            "Close",
+                            "Adj Close",
+                        ]
+                    ],
+                    symbol,
+                )
+
+                logger.info(
+                    f"{symbol} history validation: "
+                    f"{len(combined)} rows, "
+                    f"{combined.index.min().date()} "
+                    f"-> "
+                    f"{combined.index.max().date()}"
+                )
+
+                logger.info(
+                    f"{symbol} actual history: "
+                    f"{len(actual_df)} rows, "
+                    f"{actual_df.index.min().date()} "
+                    f"-> "
+                    f"{actual_df.index.max().date()}"
+                )
+
+                logger.info(
+                    f"{symbol} synthetic history: "
+                    f"{len(synthetic_df)} rows, "
+                    f"{synthetic_df.index.min().date()} "
+                    f"-> "
+                    f"{synthetic_df.index.max().date()}"
+                )
+
+                handoff_columns = [
+                    "Open",
+                    "High",
+                    "Low",
+                    "Close",
+                    "Adj Close",
+                ]
+
+                logger.info(
+                    f"{symbol} handoff window:"
+                )
+
+                logger.info(
+                    "\n"
+                    +
+                    combined.loc[
+                        actual_start
+                        - pd.Timedelta(days=5):
+                        actual_start
+                        + pd.Timedelta(days=5),
+                        handoff_columns,
+                    ].to_string()
+                )
+
+                return combined
+
+        # ==============================================================
+        # Generic leveraged ETF synthesis
+        # ==============================================================
+
+        if (
+            "Adj Close"
+            in synthetic_underlying.columns
+        ):
             underlying_close = (
-                synthetic_underlying["Adj Close"]
+                synthetic_underlying[
+                    "Adj Close"
+                ]
                 .copy()
             )
         else:
             underlying_close = (
-                synthetic_underlying["Close"]
+                synthetic_underlying[
+                    "Close"
+                ]
                 .copy()
             )
 
@@ -697,7 +1124,7 @@ class LeveragedETFProvider:
         if len(underlying_close) < 2:
             raise ValueError(
                 f"Insufficient underlying history "
-                f"to synthesize {symbol}."
+                f"to synthesize {symbol}"
             )
 
         # --------------------------------------------------------------
@@ -709,152 +1136,50 @@ class LeveragedETFProvider:
                 treasury_df["Close"]
                 .copy()
             )
+
         elif "Adj Close" in treasury_df.columns:
             treasury_rate = (
                 treasury_df["Adj Close"]
                 .copy()
             )
+
         else:
             raise ValueError(
-                "TBILL history must contain a "
-                "Close or Adj Close column."
+                "TBILL history must contain "
+                "Close or Adj Close."
             )
 
-        # FRED DTB3 is expressed as a percentage.
-        #
-        # Example:
-        #
-        #     5.00 -> 0.05
-        #
         treasury_rate = (
-            treasury_rate / 100.0
-        )
-
-        # --------------------------------------------------------------
-        # Align financing rate with trading dates.
-        # --------------------------------------------------------------
-
-        financing_rate = (
             treasury_rate
-            .reindex(underlying_close.index)
-            .ffill()
-            .bfill()
+            / 100.0
         )
 
         # --------------------------------------------------------------
-        # Existing synthetic daily return calculation.
-        #
-        # DO NOT change this yet.
+        # Build generic NAV.
         # --------------------------------------------------------------
 
-        underlying_return = (
-            underlying_close
-            .pct_change()
-            .dropna()
-        )
-
-        financing_rate = (
-            financing_rate
-            .reindex(underlying_return.index)
-            .ffill()
-            .bfill()
-        )
-
-        # --------------------------------------------------------------
-        # Annual expense ratio -> daily expense drag.
-        # --------------------------------------------------------------
-
-        daily_expense = (
-            self.expense_ratio / 252.0
-        )
-
-        # --------------------------------------------------------------
-        # Approximate financing cost.
-        #
-        # 2x -> approximately 1x financed exposure
-        # 3x -> approximately 2x financed exposure
-        # --------------------------------------------------------------
-
-        daily_financing = (
-            (self.leverage - 1.0)
-            * financing_rate
-            / 252.0
-        )
-
-        # --------------------------------------------------------------
-        # Existing leveraged daily return.
-        # --------------------------------------------------------------
-
-        leveraged_return = (
-            self.leverage
-            * underlying_return
-            - daily_financing
-            - daily_expense
-        )
-
-        # A leveraged ETF cannot lose more than 100% on a single day.
-        #
-        # Use a very small positive floor rather than allowing an
-        # exact -100% return, because an exact -100% would permanently
-        # destroy the mathematical NAV.
-        leveraged_return = (
-            leveraged_return
-            .clip(lower=-0.999999)
-        )
-
-        # --------------------------------------------------------------
-        # Economic NAV.
-        #
-        # THIS IS THE PORTFOLIO WEALTH LAYER.
-        #
-        # Splits are deliberately NOT applied here.
-        # --------------------------------------------------------------
-
-        nav = (
-            1.0
-            * (1.0 + leveraged_return)
-            .cumprod()
+        nav, leveraged_return = (
+            self._build_generic_synthetic_nav(
+                underlying_close=underlying_close,
+                treasury_rate=treasury_rate,
+            )
         )
 
         if nav.empty:
             return actual_df
 
-        # --------------------------------------------------------------
-        # Important numerical validation.
-        #
-        # Do NOT silently replace tiny NAV with 1e-300.
-        #
-        # A very small NAV can be economically valid.
-        #
-        # Example:
-        #
-        #     $100,000 -> $143
-        #
-        # corresponds to:
-        #
-        #     NAV = 0.00143
-        #
-        # That is small, but completely representable by float64.
-        # --------------------------------------------------------------
-
         if not nav.notna().all():
-            bad_date = nav.index[
-                nav.isna()
-            ][0]
-
             raise ValueError(
-                f"Synthetic {symbol} NAV contains NaN "
-                f"on {bad_date}."
+                f"Synthetic {symbol} NAV "
+                "contains NaN values."
             )
 
-        if not nav.apply(math.isfinite).all():
-            bad_date = nav.index[
-                ~nav.apply(math.isfinite)
-            ][0]
-
+        if not nav.apply(
+            math.isfinite
+        ).all():
             raise ValueError(
-                f"Synthetic {symbol} NAV contains "
-                f"a non-finite value on {bad_date}."
+                f"Synthetic {symbol} NAV "
+                "contains non-finite values."
             )
 
         if (nav <= 0).any():
@@ -862,46 +1187,35 @@ class LeveragedETFProvider:
                 nav <= 0
             ][0]
 
-            bad_value = nav.loc[bad_date]
-
             raise ValueError(
                 f"Synthetic {symbol} NAV became "
-                f"non-positive on {bad_date}: {bad_value}"
+                f"non-positive on {bad_date}"
             )
 
         # --------------------------------------------------------------
-        # Load authoritative historical split schedule.
+        # Split layer.
+        #
+        # This is deliberately AFTER NAV construction.
+        #
+        # Splits cannot affect NAV.
         # --------------------------------------------------------------
 
-        historical_split_map = (
-            self._historical_split_factors(
-                symbol
+        historical_splits = (
+            self._build_split_series(
+                symbol,
+                nav.index,
             )
         )
 
-        historical_splits = pd.Series(
-            1.0,
-            index=nav.index,
-            dtype=float,
-        )
-
-        for date, split_factor in (
-            historical_split_map.items()
-        ):
-            if date in historical_splits.index:
-                historical_splits.loc[date] = (
-                    float(split_factor)
-                )
-
         # --------------------------------------------------------------
-        # Synthetic price denomination.
+        # Generic initial denomination.
         #
-        # Start the synthetic series around $50.
+        # This is NOT a price-band mechanism.
         #
-        # This initial denomination has NO effect on NAV or returns.
+        # It is simply the arbitrary initial share denomination.
         # --------------------------------------------------------------
 
-        synthetic_target_price = 50.0
+        target_price = 50.0
 
         (
             synthetic_price,
@@ -910,45 +1224,28 @@ class LeveragedETFProvider:
         ) = self._build_split_aware_price(
             nav=nav,
             historical_splits=historical_splits,
-            target_price=synthetic_target_price,
+            target_price=target_price,
         )
 
-        if synthetic_price.empty:
-            return actual_df
-
         # --------------------------------------------------------------
-        # Re-anchor the synthetic price to the real ETF at inception.
-        #
-        # This is a PRICE scaling operation only.
+        # Re-anchor price to actual ETF inception.
         #
         # NAV remains untouched.
         # --------------------------------------------------------------
-
-        actual_first_close = float(
-            actual_df["Close"].iloc[0]
-        )
-
-        if (
-            not math.isfinite(actual_first_close)
-            or actual_first_close <= 0
-        ):
-            raise ValueError(
-                f"Invalid first actual {symbol} close: "
-                f"{actual_first_close}"
-            )
 
         synthetic_last_price = float(
             synthetic_price.iloc[-1]
         )
 
         if (
-            not math.isfinite(synthetic_last_price)
+            not math.isfinite(
+                synthetic_last_price
+            )
             or synthetic_last_price <= 0
         ):
             raise ValueError(
-                f"Synthetic {symbol} price layer produced "
-                f"an invalid final price: "
-                f"{synthetic_last_price}"
+                f"Invalid final synthetic "
+                f"{symbol} price"
             )
 
         price_scale = (
@@ -962,50 +1259,7 @@ class LeveragedETFProvider:
         )
 
         # --------------------------------------------------------------
-        # Validate final price layer.
-        #
-        # We do NOT clip tiny prices upward to an arbitrary value.
-        #
-        # A very small positive price is valid.
-        # --------------------------------------------------------------
-
-        if not synthetic_price.notna().all():
-            bad_date = synthetic_price.index[
-                synthetic_price.isna()
-            ][0]
-
-            raise ValueError(
-                f"Synthetic {symbol} price contains "
-                f"NaN on {bad_date}"
-            )
-
-        if not synthetic_price.apply(
-            math.isfinite
-        ).all():
-            bad_date = synthetic_price.index[
-                ~synthetic_price.apply(math.isfinite)
-            ][0]
-
-            raise ValueError(
-                f"Synthetic {symbol} price contains "
-                f"a non-finite value on {bad_date}"
-            )
-
-        if (synthetic_price <= 0).any():
-            bad_date = synthetic_price.index[
-                synthetic_price <= 0
-            ][0]
-
-            raise ValueError(
-                f"Synthetic {symbol} price became "
-                f"non-positive on {bad_date}: "
-                f"{synthetic_price.loc[bad_date]}"
-            )
-
-        # --------------------------------------------------------------
-        # Build synthetic OHLC data.
-        #
-        # We only have a synthetic close series at this stage.
+        # Build OHLC.
         # --------------------------------------------------------------
 
         synthetic_df = pd.DataFrame(
@@ -1038,41 +1292,41 @@ class LeveragedETFProvider:
             applied_splits
         )
 
-        synthetic_df["Cumulative Split"] = (
-            cumulative_splits
-        )
+        synthetic_df[
+            "Cumulative Split"
+        ] = cumulative_splits
 
         synthetic_df["Volume"] = 0
 
         # --------------------------------------------------------------
-        # Synthetic diagnostics.
+        # Diagnostics.
         # --------------------------------------------------------------
 
-        synthetic_first_nav = float(
+        first_nav = float(
             nav.iloc[0]
         )
 
-        synthetic_last_nav = float(
+        last_nav = float(
             nav.iloc[-1]
         )
 
-        synthetic_min_nav = float(
+        min_nav = float(
             nav.min()
         )
 
-        synthetic_first_price = float(
+        first_price = float(
             synthetic_price.iloc[0]
         )
 
-        synthetic_last_price = float(
+        last_price = float(
             synthetic_price.iloc[-1]
         )
 
-        synthetic_min_price = float(
+        min_price = float(
             synthetic_price.min()
         )
 
-        synthetic_max_price = float(
+        max_price = float(
             synthetic_price.max()
         )
 
@@ -1083,7 +1337,7 @@ class LeveragedETFProvider:
             ).sum()
         )
 
-        cumulative_split_final = float(
+        cumulative_split = float(
             cumulative_splits.iloc[-1]
         )
 
@@ -1094,49 +1348,46 @@ class LeveragedETFProvider:
         print(
             f"    Synthetic last : "
             f"{nav.index[-1].date()} "
-            f"${synthetic_last_price:.6f}"
+            f"${last_price:.6f}"
         )
 
         print(
             f"    Actual first   : "
-            f"{actual_df.index[0].date()} "
+            f"{actual_start.date()} "
             f"${actual_first_close:.6f}"
         )
 
-        print(
-            f"    Price ratio    : "
-            f"{actual_first_close / synthetic_last_price:.4f}"
-        )
+        print(f"    Price ratio    : {actual_first_close / last_price:.4f}")
 
         print(
             f"    Synthetic first: "
             f"{nav.index[0].date()} "
-            f"${synthetic_first_price:.6f}"
+            f"${first_price:.6f}"
         )
 
         print(
             f"    Synthetic min  : "
-            f"${synthetic_min_price:.12f}"
+            f"${min_price:.12f}"
         )
 
         print(
             f"    Synthetic max  : "
-            f"${synthetic_max_price:.6f}"
+            f"${max_price:.6f}"
         )
 
         print(
             f"    Synthetic NAV first : "
-            f"{synthetic_first_nav:.12g}"
+            f"{first_nav:.12g}"
         )
 
         print(
             f"    Synthetic NAV last  : "
-            f"{synthetic_last_nav:.12g}"
+            f"{last_nav:.12g}"
         )
 
         print(
             f"    Synthetic NAV min   : "
-            f"{synthetic_min_nav:.12g}"
+            f"{min_nav:.12g}"
         )
 
         print(
@@ -1146,11 +1397,11 @@ class LeveragedETFProvider:
 
         print(
             f"    Cumulative split factor : "
-            f"{cumulative_split_final:.12g}"
+            f"{cumulative_split:.12g}"
         )
 
         # --------------------------------------------------------------
-        # Combine synthetic + actual history.
+        # Combine synthetic + actual.
         # --------------------------------------------------------------
 
         combined = pd.concat(
@@ -1160,7 +1411,6 @@ class LeveragedETFProvider:
             ]
         )
 
-        # Real ETF data wins if a date overlaps.
         combined = (
             combined[
                 ~combined.index.duplicated(
@@ -1171,41 +1421,36 @@ class LeveragedETFProvider:
         )
 
         # --------------------------------------------------------------
-        # History diagnostics.
+        # Diagnostics.
         # --------------------------------------------------------------
 
         logger.info(
             f"{symbol} history validation: "
             f"{len(combined)} rows, "
-            f"{combined.index.min().date()} -> "
+            f"{combined.index.min().date()} "
+            f"-> "
             f"{combined.index.max().date()}"
         )
 
         logger.info(
             f"{symbol} actual history: "
             f"{len(actual_df)} rows, "
-            f"{actual_df.index.min().date()} -> "
+            f"{actual_df.index.min().date()} "
+            f"-> "
             f"{actual_df.index.max().date()}"
         )
 
         logger.info(
             f"{symbol} synthetic history: "
             f"{len(synthetic_df)} rows, "
-            f"{synthetic_df.index.min().date()} -> "
+            f"{synthetic_df.index.min().date()} "
+            f"-> "
             f"{synthetic_df.index.max().date()}"
         )
 
         # --------------------------------------------------------------
-        # Handoff diagnostics.
+        # Handoff window.
         # --------------------------------------------------------------
-
-        handoff_start = (
-            actual_df.index.min()
-        )
-
-        logger.info(
-            f"{symbol} handoff window:"
-        )
 
         handoff_columns = [
             "Open",
@@ -1216,19 +1461,23 @@ class LeveragedETFProvider:
         ]
 
         logger.info(
+            f"{symbol} handoff window:"
+        )
+
+        logger.info(
             "\n"
             +
             combined.loc[
-                handoff_start
+                actual_start
                 - pd.Timedelta(days=5):
-                handoff_start
+                actual_start
                 + pd.Timedelta(days=5),
                 handoff_columns,
             ].to_string()
         )
 
         # --------------------------------------------------------------
-        # Validate completed price history.
+        # Validate.
         # --------------------------------------------------------------
 
         self.validate_history(
