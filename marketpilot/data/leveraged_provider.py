@@ -243,9 +243,90 @@ class LeveragedETFProvider:
         cls,
         symbol: str,
     ) -> dict[pd.Timestamp, float]:
-        return cls._load_csv_split_schedule(
-            symbol
-        )
+        """
+        Return historical split factors.
+
+        For this synthetic QLD experiment, QLD temporarily uses
+        the pre-inception TQQQ split schedule from simulatedTQQQ.csv.
+
+        IMPORTANT:
+            These are NOT claimed to be QLD's actual historical splits.
+
+            They are being used only as a diagnostic experiment to
+            determine how the quoted synthetic QLD price behaves when
+            historical denomination changes are applied.
+
+        TQQQ continues to use its normal schedule.
+
+        QLD only receives TQQQ split events occurring before QLD
+        inception on 2006-06-21.
+        """
+
+        symbol = symbol.upper()
+
+        # --------------------------------------------------------------
+        # TQQQ:
+        #
+        # Use the authoritative split schedule from simulatedTQQQ.csv.
+        # --------------------------------------------------------------
+
+        if symbol == "TQQQ":
+            return cls._load_csv_split_schedule(
+                symbol
+            )
+
+        # --------------------------------------------------------------
+        # QLD diagnostic experiment:
+        #
+        # Temporarily borrow the TQQQ split schedule.
+        #
+        # Only events before actual QLD inception are used.
+        # --------------------------------------------------------------
+
+        if symbol == "QLD":
+
+            tqqq_schedule = (
+                cls._load_csv_split_schedule(
+                    "TQQQ"
+                )
+            )
+
+            qld_inception = pd.Timestamp(
+                "2006-06-21"
+            )
+
+            qld_schedule = {
+                date: factor
+                for date, factor in tqqq_schedule.items()
+                if date < qld_inception
+            }
+
+            logger.info(
+                "QLD diagnostic split schedule: "
+                "using pre-inception TQQQ splits"
+            )
+
+            for date, factor in qld_schedule.items():
+                logger.info(
+                    f"    QLD synthetic split "
+                    f"{date.date()} : "
+                    f"{factor:g}"
+                )
+
+            logger.info(
+                "QLD diagnostic split events: "
+                f"{len(qld_schedule)}"
+            )
+
+            return qld_schedule
+
+        # --------------------------------------------------------------
+        # Other leveraged ETFs:
+        #
+        # No historical synthetic splits.
+        # --------------------------------------------------------------
+
+        return {}
 
     # ==================================================================
     # Split series
