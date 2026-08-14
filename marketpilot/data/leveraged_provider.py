@@ -766,6 +766,26 @@ class LeveragedETFProvider:
         treasury_df = treasury.copy()
 
         # --------------------------------------------------------------
+        # Normalize actual ETF Adj Close.
+        #
+        # Some Yahoo Finance histories can return a valid OHLC/Close
+        # series while Adj Close is entirely NaN. For the leveraged ETF
+        # history used by MarketPilot, Close is the authoritative quoted
+        # price when adjusted close is unavailable.
+        #
+        # Fill only missing Adj Close values; never overwrite valid
+        # adjusted prices.
+        # --------------------------------------------------------------
+
+        if "Adj Close" not in actual_df.columns:
+            actual_df["Adj Close"] = actual_df["Close"]
+        else:
+            actual_df["Adj Close"] = (
+                actual_df["Adj Close"]
+                .fillna(actual_df["Close"])
+            )
+
+        # --------------------------------------------------------------
         # Normalize indexes.
         # --------------------------------------------------------------
 
