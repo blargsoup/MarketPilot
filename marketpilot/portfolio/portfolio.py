@@ -22,9 +22,30 @@ Therefore:
     Apply T → T+1 return of the new position
 
 This prevents look-ahead bias.
+
+IMPORTANT:
+
+Portfolio wealth is calculated from an asset's economic return series.
+
+For synthetic leveraged ETFs produced by LeveragedETFProvider, the
+DataFrame contains a NAV column. NAV represents the economic value of
+the synthetic investment and is completely independent of share-price
+denomination and stock splits.
+
+Therefore:
+
+    Synthetic ETF:
+        portfolio return = NAV[t] / NAV[t-1]
+
+    Normal asset:
+        portfolio return = Close[t] / Close[t-1]
+
+A split must NEVER create or destroy portfolio wealth.
 """
 
 from __future__ import annotations
+
+import math
 
 from marketpilot.strategies import (
     PortfolioState,
@@ -34,7 +55,6 @@ from .equity_point import EquityPoint
 
 
 class Portfolio:
-
     """
     Simulates portfolio value throughout a backtest.
     """
@@ -55,13 +75,11 @@ class Portfolio:
         #
         # Current portfolio value.
         #
-
         self.equity = starting_value
 
         #
         # Position currently held for the day's return.
         #
-
         self.current_state = initial_state
 
         self.current_symbol = profile.asset_for_state(
@@ -73,20 +91,28 @@ class Portfolio:
         #
         # A strategy transition generated at today's EOD goes here.
         #
-
         self.pending_state = None
         self.pending_symbol = None
 
         #
-        # Previous closing price of the currently held position.
+        # Previous economic value of the currently held position.
         #
+        # IMPORTANT:
+        #
+        # This is NOT necessarily the previous closing share price.
+        #
+        # For synthetic leveraged ETFs this will be NAV.
+        #
+        self.previous_value = None
 
-        self.previous_close = None
+        #
+        # Track which economic value column is being used.
+        #
+        self.previous_value_column = None
 
         #
         # Equity history.
         #
-
         self.curve: list[EquityPoint] = []
 
     ####################################################################
@@ -142,41 +168,138 @@ class Portfolio:
             return
 
         self.current_state = self.pending_state
-
         self.current_symbol = self.pending_symbol
 
         #
-        # The first price used for the new position is tomorrow's close.
+        # The first economic value used for the new position is
+        # tomorrow's value.
         #
         # There is deliberately no return calculated against today's
-        # closing price here.
+        # closing value here.
         #
-
-        self.previous_close = None
+        self.previous_value = None
+        self.previous_value_column = None
 
         self.pending_state = None
         self.pending_symbol = None
 
     ####################################################################
-    # Daily Update
+    # Market Data Helpers
     ####################################################################
 
-    def _has_price(self, market, symbol):
+    def _has_price(
+        self,
+        market,
+        symbol,
+    ):
+
         """
-        Return True if the asset has a valid closing price
-        available for the current backtest date.
+        Return True if the asset has valid historical data available
+        for the current backtest date.
         """
 
         if symbol not in market.keys():
+
             return False
 
         history = market[symbol]
 
         if history.data.empty:
+
             return False
 
         return True
 
+    def _economic_value(
+        self,
+        history,
+    ):
+        """
+        Return the economic value used for portfolio wealth accounting.
+
+        Synthetic leveraged ETF histories contain a NAV column.
+
+        NAV is authoritative for portfolio wealth because it represents
+        the economic value of the synthetic investment independent of
+        share-price denomination and stock splits.
+
+        Normal market histories do not contain NAV, so Close is used.
+
+        Returns:
+
+            tuple[value, column_name]
+        """
+
+        data = history.data
+
+        #
+        # --------------------------------------------------------------
+        # Synthetic / NAV-backed asset
+        # --------------------------------------------------------------
+        #
+
+        if "NAV" in data.columns:
+
+            value = data["NAV"].iloc[-1]
+
+            try:
+
+                value = float(value)
+
+            except (
+                TypeError,
+                ValueError,
+            ):
+
+                value = float("nan")
+
+            if (
+                math.isfinite(value)
+                and value > 0
+            ):
+
+                return (
+                    value,
+                    "NAV",
+                )
+
+        #
+        # --------------------------------------------------------------
+        # Normal asset
+        # --------------------------------------------------------------
+        #
+
+        value = history.latest_close
+
+        try:
+
+            value = float(value)
+
+        except (
+            TypeError,
+            ValueError,
+        ):
+
+            value = float("nan")
+
+        if (
+            not math.isfinite(value)
+            or value <= 0
+        ):
+
+            raise ValueError(
+                f"Invalid economic value for "
+                f"{history.symbol}: {value}"
+            )
+
+        return (
+            value,
+            "Close",
+        )
+
+    ####################################################################
+    # Daily Update
+    ####################################################################
 
     def update(
         self,
@@ -200,7 +323,7 @@ class Portfolio:
         self._activate_pending_position()
 
         #
-        # Get today's closing price for the position being held today.
+        # Get today's data for the position being held today.
         #
 
         if not self._has_price(
@@ -211,8 +334,8 @@ class Portfolio:
             #
             # The current asset did not exist yet.
             #
-            # Do not attempt to calculate a return from
-            # an empty price history.
+            # Do not attempt to calculate a return from an empty
+            # history.
             #
 
             self.curve.append(
@@ -235,28 +358,90 @@ class Portfolio:
             self.current_symbol
         ]
 
-        close = history.latest_close
+        #
+        # --------------------------------------------------------------
+        # Get economic value.
+        # --------------------------------------------------------------
+        #
+
+        current_value, value_column = (
+            self._economic_value(
+                history
+            )
+        )
 
         #
+        # --------------------------------------------------------------
         # First day holding this asset.
+        # --------------------------------------------------------------
         #
-        # We establish today's close as the baseline.
+        # We establish today's economic value as the baseline.
+        #
+        # No return is generated on the entry day.
         #
 
-        if self.previous_close is None:
+        if self.previous_value is None:
 
-            self.previous_close = close
+            self.previous_value = current_value
+            self.previous_value_column = value_column
 
         else:
 
-            daily_return = (
-                close
-                / self.previous_close
-            )
+            #
+            # Normally the value column remains the same for the
+            # lifetime of a position.
+            #
+            # If the source changes representation, reset the baseline
+            # rather than accidentally creating a synthetic return.
+            #
 
-            self.equity *= daily_return
+            if (
+                self.previous_value_column
+                != value_column
+            ):
 
-            self.previous_close = close
+                self.previous_value = current_value
+                self.previous_value_column = value_column
+
+            else:
+
+                #
+                # Calculate the economic growth factor.
+                #
+                # This is intentionally a GROSS return factor:
+                #
+                #   1.05 = +5%
+                #   0.95 = -5%
+                #
+                daily_growth = (
+                    current_value
+                    / self.previous_value
+                )
+
+                if (
+                    not math.isfinite(
+                        daily_growth
+                    )
+                    or daily_growth <= 0
+                ):
+
+                    raise ValueError(
+                        f"Invalid daily growth factor "
+                        f"for {self.current_symbol} "
+                        f"on {date}: "
+                        f"{daily_growth}"
+                    )
+
+                #
+                # Apply economic growth to portfolio wealth.
+                #
+                self.equity *= daily_growth
+
+                #
+                # Advance baseline.
+                #
+
+                self.previous_value = current_value
 
         #
         # Record today's equity.
