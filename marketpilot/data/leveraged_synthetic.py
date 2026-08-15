@@ -1,19 +1,26 @@
 """
-Generic synthetic leveraged ETF construction.
+Synthetic leveraged ETF calculations.
 
 This module is responsible for:
 
-    1. Daily leveraged return calculation.
-    2. Economic NAV construction.
-    3. Split-aware quoted share-price construction.
-    4. Diagnostic analysis of the underlying return model.
+    1. Calculating daily leveraged returns.
+    2. Building theoretical economic NAV.
+    3. Applying financing costs.
+    4. Applying ETF expense drag.
+    5. Building a quoted share-price layer from NAV.
 
 IMPORTANT:
 
-    Economic NAV is independent of stock splits.
+Economic NAV is independent of stock splits.
 
-    Splits are applied only when constructing the quoted synthetic
-    share-price layer.
+Splits belong to leveraged_splits.py.
+
+Historical reference-price construction belongs to
+leveraged_reference.py.
+
+Validation belongs to leveraged_validation.py.
+
+This module should contain the mathematical leveraged-return engine.
 """
 
 from __future__ import annotations
@@ -28,664 +35,238 @@ logger = logging.getLogger(__name__)
 
 
 class LeveragedSyntheticBuilder:
+    """
+    Build synthetic leveraged ETF economic NAV.
 
-    def __init__(
+    The model is:
+
+        leveraged return
+            = leverage × underlying return
+            - financing cost
+            - expense drag
+
+    Financing applies only to the borrowed portion:
+
+        financing exposure = leverage - 1
+
+    For example:
+
+        2× ETF:
+            financing exposure = 1×
+
+        3× ETF:
+            financing exposure = 2×
+    """
+
+    # ------------------------------------------------------------------
+    # Treasury normalization
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _normalize_treasury_rate(
+        treasury_rate: pd.Series,
+    ) -> pd.Series:
+        """
+        Normalize the Treasury series into decimal annual rates.
+
+        MarketPilot's FRED/TBILL provider is currently returning values
+        such as:
+
+            1201.117
+            1501.959
+
+        These represent:
+
+            12.01117%
+            15.01959%
+
+        Therefore the conversion is:
+
+            raw / 10000
+
+        producing:
+
+            0.1201117
+            0.1501959
+
+        which are decimal annual rates.
+
+        The function deliberately checks the resulting magnitude so a
+        unit error cannot silently produce a multi-percent-per-day
+        financing charge.
+        """
+
+        rate = pd.to_numeric(
+            treasury_rate,
+            errors="coerce",
+        )
+
+        if rate.empty:
+            raise ValueError(
+                "Treasury rate series is empty."
+            )
+
+        if rate.isna().all():
+            raise ValueError(
+                "Treasury rate series contains no valid values."
+            )
+
+        rate = (
+            rate
+            .ffill()
+            .bfill()
+        )
+
+        if rate.isna().any():
+            raise ValueError(
+                "Treasury rate series contains NaN values "
+                "after forward/backward filling."
+            )
+
+        # --------------------------------------------------------------
+        # Current FRED provider representation.
+        #
+        # Example:
+        #
+        #     1201.117 -> 0.1201117
+        #
+        #     1501.959 -> 0.1501959
+        #
+        # --------------------------------------------------------------
+
+        normalized = (
+            rate
+            / 10000.0
+        )
+
+        # --------------------------------------------------------------
+        # Sanity check.
+        #
+        # A Treasury rate greater than 100% is almost certainly a unit
+        # conversion error.
+        # --------------------------------------------------------------
+
+        maximum = float(
+            normalized.abs().max()
+        )
+
+        if (
+            not math.isfinite(maximum)
+            or maximum > 1.0
+        ):
+            raise ValueError(
+                "Normalized Treasury rate is invalid. "
+                f"Maximum absolute annual rate = "
+                f"{maximum:.6f}. "
+                "Expected decimal annual rates."
+            )
+
+        return normalized
+
+    # ------------------------------------------------------------------
+    # Daily leveraged return
+    # ------------------------------------------------------------------
+
+    def build_synthetic_nav(
         self,
+        underlying_close: pd.Series,
+        treasury_rate: pd.Series,
         leverage: float,
         expense_ratio: float,
     ):
-
-        self.leverage = leverage
-        self.expense_ratio = expense_ratio
-
-    # ==================================================================
-    # Diagnostic analysis
-    # ==================================================================
-
-    def diagnose(
-        self,
-        underlying_close: pd.Series,
-        underlying_adj_close: pd.Series | None,
-        treasury_rate: pd.Series,
-        symbol: str,
-    ) -> None:
         """
-        Diagnose the generic leveraged ETF model.
+        Build theoretical leveraged ETF NAV.
 
-        This method DOES NOT change the production NAV.
+        Parameters
+        ----------
+        underlying_close:
+            Underlying ETF price series.
 
-        It compares:
+        treasury_rate:
+            Annual Treasury rate series.
 
-            - QQQ Close
-            - QQQ Adj Close
-            - daily returns
-            - theoretical 2x Close NAV
-            - theoretical 2x Adj Close NAV
-            - financing drag
-            - expense drag
-            - full leveraged model
+        leverage:
+            Target leverage, e.g. 2.0 or 3.0.
 
-        The goal is to determine why a synthetic leveraged ETF
-        may collapse during the pre-inception period.
+        expense_ratio:
+            Annual ETF expense ratio as decimal.
+
+            Example:
+
+                0.0095 = 0.95%
+
+        Returns
+        -------
+        nav:
+            Synthetic economic NAV.
+
+        leveraged_return:
+            Daily leveraged return before compounding.
         """
 
-        logger.info("")
-        logger.info(
-            "=================================================="
-        )
-        logger.info(
-            f"LEVERAGED SYNTHETIC DIAGNOSTICS: {symbol}"
-        )
-        logger.info(
-            "=================================================="
-        )
+        if underlying_close is None:
+            raise ValueError(
+                "Underlying close series is None."
+            )
+
+        if treasury_rate is None:
+            raise ValueError(
+                "Treasury rate series is None."
+            )
+
+        if (
+            not math.isfinite(leverage)
+            or leverage <= 0
+        ):
+            raise ValueError(
+                f"Invalid leverage: {leverage}"
+            )
+
+        if (
+            not math.isfinite(expense_ratio)
+            or expense_ratio < 0
+        ):
+            raise ValueError(
+                f"Invalid expense ratio: "
+                f"{expense_ratio}"
+            )
 
         # --------------------------------------------------------------
-        # Normalize Close.
+        # Normalize underlying.
         # --------------------------------------------------------------
 
-        close = (
+        underlying_close = pd.to_numeric(
+            underlying_close,
+            errors="coerce",
+        )
+
+        underlying_close = (
             underlying_close
-            .astype(float)
             .dropna()
         )
 
-        close = close[
-            close > 0
-        ]
-
-        # --------------------------------------------------------------
-        # Normalize Adj Close.
-        # --------------------------------------------------------------
-
-        if underlying_adj_close is not None:
-
-            adj_close = (
-                underlying_adj_close
-                .astype(float)
-                .reindex(close.index)
-                .dropna()
-            )
-
-            adj_close = adj_close[
-                adj_close > 0
+        underlying_close = (
+            underlying_close[
+                underlying_close > 0
             ]
+        )
 
-        else:
-
-            adj_close = None
+        if len(underlying_close) < 2:
+            raise ValueError(
+                "Insufficient underlying history "
+                "to calculate leveraged returns."
+            )
 
         # --------------------------------------------------------------
-        # Normalize treasury.
+        # Daily underlying return.
         #
-        # IMPORTANT:
+        # This intentionally uses the supplied Close series directly.
         #
-        # The provider passes the FRED rate as a decimal
-        # (for example 0.0525 = 5.25%).
+        # return[t] =
+        #
+        #     Close[t] / Close[t-1] - 1
+        #
         # --------------------------------------------------------------
-
-        treasury = (
-            treasury_rate
-            .astype(float)
-            .reindex(close.index)
-            .ffill()
-            .bfill()
-        )
-
-        # ==============================================================
-        # 1. UNDERLYING DATA
-        # ==============================================================
-
-        logger.info("")
-        logger.info(
-            "QQQ PRICE DATA"
-        )
-        logger.info(
-            "--------------------------------------------------"
-        )
-
-        logger.info(
-            f"Rows              : {len(close)}"
-        )
-
-        logger.info(
-            f"First date        : "
-            f"{close.index.min().date()}"
-        )
-
-        logger.info(
-            f"Last date         : "
-            f"{close.index.max().date()}"
-        )
-
-        logger.info(
-            f"First Close       : "
-            f"{close.iloc[0]:.10f}"
-        )
-
-        logger.info(
-            f"Last Close        : "
-            f"{close.iloc[-1]:.10f}"
-        )
-
-        logger.info(
-            f"Minimum Close     : "
-            f"{close.min():.10f}"
-        )
-
-        logger.info(
-            f"Maximum Close     : "
-            f"{close.max():.10f}"
-        )
-
-        if adj_close is not None:
-
-            logger.info(
-                f"First Adj Close   : "
-                f"{adj_close.iloc[0]:.10f}"
-            )
-
-            logger.info(
-                f"Last Adj Close    : "
-                f"{adj_close.iloc[-1]:.10f}"
-            )
-
-            logger.info(
-                f"Minimum Adj Close : "
-                f"{adj_close.min():.10f}"
-            )
-
-            logger.info(
-                f"Maximum Adj Close : "
-                f"{adj_close.max():.10f}"
-            )
-
-        # ==============================================================
-        # 2. CLOSE VS ADJ CLOSE
-        # ==============================================================
-
-        if adj_close is not None:
-
-            comparison = pd.concat(
-                [
-                    close.rename("Close"),
-                    adj_close.rename(
-                        "Adj Close"
-                    ),
-                ],
-                axis=1,
-            ).dropna()
-
-            comparison[
-                "Adj/Close"
-            ] = (
-                comparison["Adj Close"]
-                / comparison["Close"]
-            )
-
-            logger.info("")
-            logger.info(
-                "QQQ CLOSE vs ADJ CLOSE"
-            )
-            logger.info(
-                "--------------------------------------------------"
-            )
-
-            logger.info(
-                f"First Adj/Close ratio : "
-                f"{comparison['Adj/Close'].iloc[0]:.10f}"
-            )
-
-            logger.info(
-                f"Last Adj/Close ratio  : "
-                f"{comparison['Adj/Close'].iloc[-1]:.10f}"
-            )
-
-            logger.info(
-                f"Minimum ratio         : "
-                f"{comparison['Adj/Close'].min():.10f}"
-            )
-
-            logger.info(
-                f"Maximum ratio         : "
-                f"{comparison['Adj/Close'].max():.10f}"
-            )
-
-            # ----------------------------------------------------------
-            # Show the largest Close vs Adj Close divergences.
-            # ----------------------------------------------------------
-
-            comparison[
-                "Difference %"
-            ] = (
-                (
-                    comparison["Adj/Close"]
-                    - 1.0
-                )
-                * 100.0
-            )
-
-            largest = (
-                comparison[
-                    "Difference %"
-                ]
-                .abs()
-                .sort_values(
-                    ascending=False
-                )
-                .head(10)
-            )
-
-            logger.info("")
-            logger.info(
-                "Largest Close/Adj Close differences:"
-            )
-
-            for date in largest.index:
-
-                row = comparison.loc[
-                    date
-                ]
-
-                logger.info(
-                    f"    {date.date()} | "
-                    f"Close={row['Close']:.8f} | "
-                    f"Adj={row['Adj Close']:.8f} | "
-                    f"Difference="
-                    f"{row['Difference %']:.6f}%"
-                )
-
-        # ==============================================================
-        # 3. DAILY RETURNS
-        # ==============================================================
-
-        close_return = (
-            close
-            .pct_change()
-            .dropna()
-        )
-
-        if adj_close is not None:
-
-            adj_return = (
-                adj_close
-                .pct_change()
-                .dropna()
-            )
-
-        else:
-
-            adj_return = None
-
-        logger.info("")
-        logger.info(
-            "DAILY RETURN DIAGNOSTICS"
-        )
-        logger.info(
-            "--------------------------------------------------"
-        )
-
-        logger.info(
-            f"Close first return : "
-            f"{close_return.iloc[0] * 100:.8f}%"
-        )
-
-        logger.info(
-            f"Close worst return : "
-            f"{close_return.min() * 100:.8f}%"
-        )
-
-        logger.info(
-            f"Close best return  : "
-            f"{close_return.max() * 100:.8f}%"
-        )
-
-        logger.info(
-            f"Close mean return  : "
-            f"{close_return.mean() * 100:.8f}%"
-        )
-
-        if adj_return is not None:
-
-            logger.info(
-                f"Adj first return   : "
-                f"{adj_return.iloc[0] * 100:.8f}%"
-            )
-
-            logger.info(
-                f"Adj worst return   : "
-                f"{adj_return.min() * 100:.8f}%"
-            )
-
-            logger.info(
-                f"Adj best return    : "
-                f"{adj_return.max() * 100:.8f}%"
-            )
-
-            logger.info(
-                f"Adj mean return    : "
-                f"{adj_return.mean() * 100:.8f}%"
-            )
-
-        # ==============================================================
-        # 4. THEORETICAL 2x CLOSE NAV
-        # ==============================================================
-
-        theoretical_close_return = (
-            2.0 * close_return
-        )
-
-        theoretical_2x_close_nav = (
-            (
-                1.0
-                + theoretical_close_return
-            )
-            .clip(
-                lower=-0.999999
-            )
-            .cumprod()
-        )
-
-        logger.info("")
-        logger.info(
-            "THEORETICAL 2x QQQ CLOSE-RETURN NAV"
-        )
-        logger.info(
-            "--------------------------------------------------"
-        )
-
-        logger.info(
-            f"First NAV : "
-            f"{theoretical_2x_close_nav.iloc[0]:.12g}"
-        )
-
-        logger.info(
-            f"Last NAV  : "
-            f"{theoretical_2x_close_nav.iloc[-1]:.12g}"
-        )
-
-        logger.info(
-            f"Minimum NAV : "
-            f"{theoretical_2x_close_nav.min():.12g}"
-        )
-
-        # ==============================================================
-        # 5. THEORETICAL 2x ADJ CLOSE NAV
-        # ==============================================================
-
-        theoretical_2x_adj_nav = None
-
-        if adj_return is not None:
-
-            theoretical_2x_adj_nav = (
-                (
-                    1.0
-                    + 2.0 * adj_return
-                )
-                .clip(
-                    lower=-0.999999
-                )
-                .cumprod()
-            )
-
-            logger.info("")
-            logger.info(
-                "THEORETICAL 2x QQQ ADJ-CLOSE NAV"
-            )
-            logger.info(
-                "--------------------------------------------------"
-            )
-
-            logger.info(
-                f"First NAV : "
-                f"{theoretical_2x_adj_nav.iloc[0]:.12g}"
-            )
-
-            logger.info(
-                f"Last NAV  : "
-                f"{theoretical_2x_adj_nav.iloc[-1]:.12g}"
-            )
-
-            logger.info(
-                f"Minimum NAV : "
-                f"{theoretical_2x_adj_nav.min():.12g}"
-            )
-
-        # ==============================================================
-        # 6. TREASURY FINANCING
-        # ==============================================================
-
-        daily_expense = (
-            self.expense_ratio
-            / 252.0
-        )
-
-        daily_financing = (
-            (self.leverage - 1.0)
-            * treasury
-            / 252.0
-        )
-
-        logger.info("")
-        logger.info(
-            "TREASURY FINANCING DIAGNOSTICS"
-        )
-        logger.info(
-            "--------------------------------------------------"
-        )
-
-        logger.info(
-            f"Leverage             : "
-            f"{self.leverage:.4f}"
-        )
-
-        logger.info(
-            f"Expense ratio        : "
-            f"{self.expense_ratio:.8f}"
-        )
-
-        logger.info(
-            f"Treasury first       : "
-            f"{treasury.iloc[0] * 100:.8f}%"
-        )
-
-        logger.info(
-            f"Treasury last        : "
-            f"{treasury.iloc[-1] * 100:.8f}%"
-        )
-
-        logger.info(
-            f"Treasury minimum     : "
-            f"{treasury.min() * 100:.8f}%"
-        )
-
-        logger.info(
-            f"Treasury maximum     : "
-            f"{treasury.max() * 100:.8f}%"
-        )
-
-        logger.info(
-            f"Daily financing first: "
-            f"{daily_financing.iloc[0] * 100:.10f}%"
-        )
-
-        logger.info(
-            f"Daily financing mean : "
-            f"{daily_financing.mean() * 100:.10f}%"
-        )
-
-        logger.info(
-            f"Daily financing max  : "
-            f"{daily_financing.max() * 100:.10f}%"
-        )
-
-        logger.info(
-            f"Daily expense drag   : "
-            f"{daily_expense * 100:.10f}%"
-        )
-
-        # ==============================================================
-        # 7. FULL THEORETICAL LEVERAGED MODEL
-        # ==============================================================
-
-        financing_aligned = (
-            daily_financing
-            .reindex(
-                close_return.index
-            )
-            .ffill()
-            .bfill()
-        )
-
-        full_model_return = (
-            self.leverage
-            * close_return
-            - financing_aligned
-            - daily_expense
-        )
-
-        full_model_return = (
-            full_model_return
-            .clip(
-                lower=-0.999999
-            )
-        )
-
-        full_model_nav = (
-            (
-                1.0
-                + full_model_return
-            )
-            .cumprod()
-        )
-
-        logger.info("")
-        logger.info(
-            "FULL THEORETICAL LEVERAGED MODEL"
-        )
-        logger.info(
-            "--------------------------------------------------"
-        )
-
-        logger.info(
-            f"First NAV : "
-            f"{full_model_nav.iloc[0]:.12g}"
-        )
-
-        logger.info(
-            f"Last NAV  : "
-            f"{full_model_nav.iloc[-1]:.12g}"
-        )
-
-        logger.info(
-            f"Minimum NAV : "
-            f"{full_model_nav.min():.12g}"
-        )
-
-        # ==============================================================
-        # 8. HISTORICAL CHECKPOINTS
-        # ==============================================================
-
-        logger.info("")
-        logger.info(
-            "HISTORICAL NAV CHECKPOINTS"
-        )
-        logger.info(
-            "--------------------------------------------------"
-        )
-
-        checkpoints = [
-            "1999-03-11",
-            "2000-03-10",
-            "2001-01-02",
-            "2002-01-02",
-            "2003-01-02",
-            "2004-01-02",
-            "2005-01-03",
-            "2006-01-03",
-            "2006-06-20",
-        ]
-
-        for checkpoint in checkpoints:
-
-            checkpoint_date = (
-                pd.Timestamp(checkpoint)
-            )
-
-            valid_close = (
-                theoretical_2x_close_nav.index[
-                    theoretical_2x_close_nav.index
-                    <= checkpoint_date
-                ]
-            )
-
-            if len(valid_close) == 0:
-                continue
-
-            date = valid_close[-1]
-
-            close_nav = float(
-                theoretical_2x_close_nav.loc[
-                    date
-                ]
-            )
-
-            full_valid = (
-                full_model_nav.index[
-                    full_model_nav.index
-                    <= date
-                ]
-            )
-
-            if len(full_valid) > 0:
-
-                full_nav = float(
-                    full_model_nav.loc[
-                        full_valid[-1]
-                    ]
-                )
-
-            else:
-
-                full_nav = float("nan")
-
-            logger.info(
-                f"{date.date()} | "
-                f"2x Close NAV="
-                f"{close_nav:.12g} | "
-                f"Full NAV="
-                f"{full_nav:.12g}"
-            )
-
-        logger.info("")
-        logger.info(
-            "=================================================="
-        )
-        logger.info(
-            "END LEVERAGED SYNTHETIC DIAGNOSTICS"
-        )
-        logger.info(
-            "=================================================="
-        )
-
-    # ==================================================================
-    # Production NAV builder
-    # ==================================================================
-
-    def build_nav(
-        self,
-        underlying_close: pd.Series,
-        treasury_rate: pd.Series,
-    ):
-        """
-        Build the production economic NAV.
-
-        Daily leveraged return:
-
-            leverage × underlying return
-            - financing cost
-            - expense ratio
-        """
 
         underlying_return = (
             underlying_close
@@ -693,8 +274,27 @@ class LeveragedSyntheticBuilder:
             .dropna()
         )
 
+        if underlying_return.empty:
+            raise ValueError(
+                "Unable to calculate underlying returns."
+            )
+
+        # --------------------------------------------------------------
+        # Normalize Treasury.
+        # --------------------------------------------------------------
+
+        treasury_decimal = (
+            self._normalize_treasury_rate(
+                treasury_rate
+            )
+        )
+
+        # --------------------------------------------------------------
+        # Align Treasury to trading dates.
+        # --------------------------------------------------------------
+
         financing_rate = (
-            treasury_rate
+            treasury_decimal
             .reindex(
                 underlying_return.index
             )
@@ -702,23 +302,73 @@ class LeveragedSyntheticBuilder:
             .bfill()
         )
 
+        if financing_rate.isna().any():
+            raise ValueError(
+                "Treasury financing rate contains "
+                "NaN values after alignment."
+            )
+
+        # --------------------------------------------------------------
+        # Daily expense drag.
+        #
+        # Expense ratio is annualized.
+        #
+        # Example:
+        #
+        #     0.95% / 252
+        #
+        # --------------------------------------------------------------
+
         daily_expense = (
-            self.expense_ratio
+            expense_ratio
             / 252.0
         )
 
+        # --------------------------------------------------------------
+        # Financing exposure.
+        #
+        # A 2× ETF borrows approximately 1×.
+        #
+        # A 3× ETF borrows approximately 2×.
+        #
+        # Therefore:
+        #
+        #     financing exposure = leverage - 1
+        #
+        # --------------------------------------------------------------
+
+        financing_exposure = (
+            leverage - 1.0
+        )
+
         daily_financing = (
-            (self.leverage - 1.0)
+            financing_exposure
             * financing_rate
             / 252.0
         )
 
+        # --------------------------------------------------------------
+        # Leveraged daily return.
+        # --------------------------------------------------------------
+
         leveraged_return = (
-            self.leverage
+            leverage
             * underlying_return
             - daily_financing
             - daily_expense
         )
+
+        # --------------------------------------------------------------
+        # Prevent mathematical collapse below -100%.
+        #
+        # This is NOT a market assumption.
+        #
+        # It simply prevents:
+        #
+        #     1 + return <= 0
+        #
+        # from making the compounded NAV invalid.
+        # --------------------------------------------------------------
 
         leveraged_return = (
             leveraged_return
@@ -727,12 +377,137 @@ class LeveragedSyntheticBuilder:
             )
         )
 
+        # --------------------------------------------------------------
+        # Compound economic NAV.
+        # --------------------------------------------------------------
+
         nav = (
-            (
-                1.0
-                + leveraged_return
-            )
+            (1.0 + leveraged_return)
             .cumprod()
+        )
+
+        if nav.empty:
+            raise ValueError(
+                "Synthetic NAV is empty."
+            )
+
+        if nav.isna().any():
+            raise ValueError(
+                "Synthetic NAV contains NaN values."
+            )
+
+        if not nav.apply(
+            math.isfinite
+        ).all():
+            raise ValueError(
+                "Synthetic NAV contains "
+                "non-finite values."
+            )
+
+        if (nav <= 0).any():
+            bad_date = nav.index[
+                nav <= 0
+            ][0]
+
+            raise ValueError(
+                "Synthetic NAV became "
+                f"non-positive on {bad_date}."
+            )
+
+        # --------------------------------------------------------------
+        # Diagnostics.
+        # --------------------------------------------------------------
+
+        logger.info(
+            "Synthetic return model: "
+            f"{leverage:.1f}x underlying"
+        )
+
+        logger.info(
+            "Underlying return diagnostics:"
+        )
+
+        logger.info(
+            f"    First return : "
+            f"{underlying_return.iloc[0] * 100:.6f}%"
+        )
+
+        logger.info(
+            f"    Worst return : "
+            f"{underlying_return.min() * 100:.6f}%"
+        )
+
+        logger.info(
+            f"    Best return  : "
+            f"{underlying_return.max() * 100:.6f}%"
+        )
+
+        logger.info(
+            f"    Mean return  : "
+            f"{underlying_return.mean() * 100:.6f}%"
+        )
+
+        logger.info(
+            "Treasury financing diagnostics:"
+        )
+
+        logger.info(
+            f"    Annual rate first : "
+            f"{financing_rate.iloc[0] * 100:.6f}%"
+        )
+
+        logger.info(
+            f"    Annual rate last  : "
+            f"{financing_rate.iloc[-1] * 100:.6f}%"
+        )
+
+        logger.info(
+            f"    Annual rate min   : "
+            f"{financing_rate.min() * 100:.6f}%"
+        )
+
+        logger.info(
+            f"    Annual rate max   : "
+            f"{financing_rate.max() * 100:.6f}%"
+        )
+
+        logger.info(
+            f"    Daily financing first : "
+            f"{daily_financing.iloc[0] * 100:.8f}%"
+        )
+
+        logger.info(
+            f"    Daily financing mean  : "
+            f"{daily_financing.mean() * 100:.8f}%"
+        )
+
+        logger.info(
+            f"    Daily financing max   : "
+            f"{daily_financing.max() * 100:.8f}%"
+        )
+
+        logger.info(
+            f"    Daily expense drag    : "
+            f"{daily_expense * 100:.8f}%"
+        )
+
+        logger.info(
+            "Synthetic NAV diagnostics:"
+        )
+
+        logger.info(
+            f"    First NAV : "
+            f"{nav.iloc[0]:.12g}"
+        )
+
+        logger.info(
+            f"    Last NAV  : "
+            f"{nav.iloc[-1]:.12g}"
+        )
+
+        logger.info(
+            f"    Minimum NAV : "
+            f"{nav.min():.12g}"
         )
 
         return (
@@ -740,157 +515,73 @@ class LeveragedSyntheticBuilder:
             leveraged_return,
         )
 
-    # ==================================================================
-    # Split-aware quoted price
-    # ==================================================================
+    # ------------------------------------------------------------------
+    # Generic compatibility method
+    # ------------------------------------------------------------------
 
-    @staticmethod
-    def build_split_aware_price(
-        nav: pd.Series,
-        historical_splits: pd.Series,
-        target_price: float,
+    def build_generic_synthetic_nav(
+        self,
+        underlying_close: pd.Series,
+        treasury_rate: pd.Series,
     ):
         """
-        Convert economic NAV into a quoted synthetic share price.
+        Compatibility wrapper for the existing MarketPilot provider.
 
-        Splits modify:
-
-            share count
-            quoted price
-
-        Splits do NOT modify NAV.
+        The provider already stores leverage and expense ratio on the
+        LeveragedETFProvider instance, so this method allows the engine
+        to be used without changing that calling convention.
         """
 
-        if nav.empty:
-
-            empty = pd.Series(
-                dtype=float,
-                index=nav.index,
-            )
-
-            return (
-                empty,
-                empty,
-                empty,
-            )
-
-        nav = nav.astype(float)
-
-        historical_splits = (
-            historical_splits
-            .reindex(nav.index)
-            .fillna(1.0)
-        )
-
-        first_nav = float(
-            nav.iloc[0]
-        )
-
-        if (
-            not math.isfinite(first_nav)
-            or first_nav <= 0
+        if not hasattr(
+            self,
+            "leverage",
         ):
-            raise ValueError(
-                f"Invalid first NAV: "
-                f"{first_nav}"
+            raise AttributeError(
+                "LeveragedSyntheticEngine requires "
+                "'leverage' when using "
+                "build_generic_synthetic_nav()."
             )
 
-        if (
-            not math.isfinite(target_price)
-            or target_price <= 0
+        if not hasattr(
+            self,
+            "expense_ratio",
         ):
-            raise ValueError(
-                f"Invalid target price: "
-                f"{target_price}"
+            raise AttributeError(
+                "LeveragedSyntheticEngine requires "
+                "'expense_ratio' when using "
+                "build_generic_synthetic_nav()."
             )
 
-        shares = (
-            first_nav
-            / target_price
+        return self.build_synthetic_nav(
+            underlying_close=underlying_close,
+            treasury_rate=treasury_rate,
+            leverage=self.leverage,
+            expense_ratio=self.expense_ratio,
         )
 
-        prices = []
-        applied_splits = []
-        cumulative_splits = []
 
-        cumulative_split = 1.0
+# ======================================================================
+# Backwards-compatible standalone function
+# ======================================================================
 
-        for date in nav.index:
+def build_generic_synthetic_nav(
+    underlying_close: pd.Series,
+    treasury_rate: pd.Series,
+    leverage: float,
+    expense_ratio: float,
+):
+    """
+    Standalone compatibility function.
 
-            nav_value = float(
-                nav.loc[date]
-            )
+    This allows existing code that imports the mathematical engine
+    directly to continue working.
+    """
 
-            if (
-                not math.isfinite(nav_value)
-                or nav_value <= 0
-            ):
-                raise ValueError(
-                    f"Invalid NAV on "
-                    f"{date}: {nav_value}"
-                )
+    engine = LeveragedSyntheticEngine()
 
-            split_factor = float(
-                historical_splits.loc[date]
-            )
-
-            if (
-                not math.isfinite(
-                    split_factor
-                )
-                or split_factor <= 0
-            ):
-                split_factor = 1.0
-
-            if not math.isclose(
-                split_factor,
-                1.0,
-            ):
-
-                shares *= split_factor
-
-                cumulative_split *= (
-                    split_factor
-                )
-
-            price = (
-                nav_value
-                / shares
-            )
-
-            if (
-                not math.isfinite(price)
-                or price <= 0
-            ):
-                raise ValueError(
-                    f"Invalid synthetic price "
-                    f"on {date}: {price}"
-                )
-
-            prices.append(price)
-
-            applied_splits.append(
-                split_factor
-            )
-
-            cumulative_splits.append(
-                cumulative_split
-            )
-
-        return (
-            pd.Series(
-                prices,
-                index=nav.index,
-                dtype=float,
-            ),
-            pd.Series(
-                applied_splits,
-                index=nav.index,
-                dtype=float,
-            ),
-            pd.Series(
-                cumulative_splits,
-                index=nav.index,
-                dtype=float,
-            ),
-        )
+    return engine.build_synthetic_nav(
+        underlying_close=underlying_close,
+        treasury_rate=treasury_rate,
+        leverage=leverage,
+        expense_ratio=expense_ratio,
+    )
