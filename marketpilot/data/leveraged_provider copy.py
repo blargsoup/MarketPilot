@@ -445,25 +445,30 @@ class LeveragedETFProvider:
         # Treasury rate.
         # --------------------------------------------------------------
 
-        if "Close" in treasury_df.columns:
+        # --------------------------------------------------------------
+        # Treasury rate.
+        # --------------------------------------------------------------
+        #
+        # TreasuryBillProvider exposes:
+        #
+        #     Close = synthetic $100 cash-equivalent price index
+        #     Rate  = annualized Treasury yield as a decimal
+        #
+        # The leveraged model requires Rate, not Close.
+        # --------------------------------------------------------------
+
+        if "Rate" in treasury_df.columns:
 
             treasury_rate = (
-                treasury_df["Close"]
-                .copy()
-            )
-
-        elif "Adj Close" in treasury_df.columns:
-
-            treasury_rate = (
-                treasury_df["Adj Close"]
+                treasury_df["Rate"]
                 .copy()
             )
 
         else:
 
             raise ValueError(
-                "TBILL history must contain "
-                "Close or Adj Close."
+                "TBILL history must contain a "
+                "'Rate' column for leveraged financing."
             )
 
         logger.info("")
@@ -524,16 +529,30 @@ class LeveragedETFProvider:
         # therefore must NOT perform another conversion.
         # --------------------------------------------------------------
 
-        if "Close" in treasury_df.columns:
-            treasury_rate = treasury_df["Close"].copy()
+        # --------------------------------------------------------------
+        # Treasury rate.
+        # --------------------------------------------------------------
+        #
+        # TreasuryBillProvider exposes:
+        #
+        #     Close = synthetic $100 cash-equivalent price index
+        #     Rate  = annualized Treasury yield as a decimal
+        #
+        # The leveraged model requires Rate, not Close.
+        # --------------------------------------------------------------
 
-        elif "Adj Close" in treasury_df.columns:
-            treasury_rate = treasury_df["Adj Close"].copy()
+        if "Rate" in treasury_df.columns:
+
+            treasury_rate = (
+                treasury_df["Rate"]
+                .copy()
+            )
 
         else:
+
             raise ValueError(
-                "TBILL history must contain "
-                "Close or Adj Close."
+                "TBILL history must contain a "
+                "'Rate' column for leveraged financing."
             )
 
         treasury_rate = pd.to_numeric(

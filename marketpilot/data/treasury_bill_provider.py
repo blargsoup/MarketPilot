@@ -170,6 +170,14 @@ class TreasuryBillProvider(MarketDataProvider):
         )
 
         #
+        # Preserve the annualized Treasury yield separately.
+        #
+        # The leveraged synthetic ETF engine needs the actual annual
+        # financing rate, not the synthetic cash price index.
+        #
+        raw["Rate"] = annual_yield
+
+        #
         # Build a synthetic total-return price index.
         #
         # Start at 100.
