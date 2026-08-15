@@ -9,8 +9,8 @@ from marketpilot.models import MarketHistory
 
 from .yahoo_data_provider import YahooDataProvider
 from .treasury_bill_provider import TreasuryBillProvider
+from .synthetic_data_provider import SyntheticDataProvider
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from .leveraged_provider import LeveragedETFProvider
 
 
 class MarketDataService:
@@ -18,21 +18,16 @@ class MarketDataService:
     Main interface for obtaining market data.
     """
 
-    SYNTHETIC_LEVERAGED = {
-        "QLD": {
-            "underlying": "QQQ",
-            "leverage": 2.0,
-            "expense_ratio": 0.0095,
-            "financing_asset": "TBILL",
-        },
-        "TQQQ": {
-            "underlying": "QQQ",
-            "leverage": 3.0,
-            "expense_ratio": 0.0095,
-            "financing_asset": "TBILL",
-        },
+    STATIC_SYNTHETIC = {
+        "QQQ",
+        "QLD",
+        "TQQQ",
+        "SSO",
+        "SPXL",
+        "SQQQ",
     }
 
+    
     def __init__(self):
 
         self.provider = YahooDataProvider()
@@ -40,6 +35,8 @@ class MarketDataService:
         self.providers = {
             "TBILL": TreasuryBillProvider(),
         }
+
+        self.synthetic_provider = SyntheticDataProvider()
 
         self.cache = CacheManager()
 
@@ -50,6 +47,26 @@ class MarketDataService:
         interval="1d",
         refresh=True,
     ) -> MarketHistory:
+
+        symbol = symbol.upper()
+
+        if symbol in self.STATIC_SYNTHETIC:
+
+            df = self.synthetic_provider.get_history(
+                symbol=symbol,
+                period=period,
+                interval=interval,
+            )
+
+            self.cache.save(
+                symbol,
+                df,
+            )
+
+            return MarketHistory(
+                symbol=symbol,
+                data=df,
+            )
 
         if symbol == "TBILL" and self.cache.exists(symbol):
 
@@ -160,65 +177,20 @@ class MarketDataService:
 
         print(f"Creating cache for {symbol}...")
 
-        if symbol in self.SYNTHETIC_LEVERAGED:
+        # --------------------------------------------------------------
+        # Static synthetic historical datasets.
+        #
+        # These are repository-provided historical research series.
+        # They are loaded directly and are NOT reconstructed at runtime.
+        # --------------------------------------------------------------
 
-            config = self.SYNTHETIC_LEVERAGED[
-                symbol
-            ]
+        if symbol in self.STATIC_SYNTHETIC:
 
-            #
-            # Load actual ETF history.
-            #
-
-            actual_provider = self._provider_for(
-                symbol
-            )
-
-            actual_history = actual_provider.get_history(
+            df = self.synthetic_provider.get_history(
                 symbol=symbol,
                 period=period,
                 interval=interval,
             )
-
-            #
-            # Build synthetic pre-inception history.
-            #
-
-            provider = LeveragedETFProvider(
-
-                underlying_provider=self._provider_for(
-                    config["underlying"]
-                ),
-
-                treasury_provider=self._provider_for(
-                    config["financing_asset"]
-                ),
-
-                leverage=config["leverage"],
-
-                expense_ratio=config["expense_ratio"],
-
-            )
-
-            df = provider.get_history(
-
-                symbol=symbol,
-
-                underlying_symbol=config[
-                    "underlying"
-                ],
-
-                actual_history=actual_history,
-
-                period=period,
-
-                interval=interval,
-
-            )
-
-            #
-            # Cache the completed continuous history.
-            #
 
             self.cache.save(
                 symbol,
