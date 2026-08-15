@@ -466,20 +466,88 @@ class LeveragedETFProvider:
                 "Close or Adj Close."
             )
 
-        # FRED TBILL is expressed as a percentage.
+        # --------------------------------------------------------------
+        # Treasury rate.
+        # --------------------------------------------------------------
         #
-        # Convert:
+        # The FRED TBILL provider returns annual Treasury rates in
+        # percentage-point form.
         #
-        #     5.25
+        # Example:
         #
-        # into:
+        #     5.25  ->  5.25%
         #
-        #     0.0525
+        # Convert exactly once here into decimal annual form:
         #
+        #     5.25  ->  0.0525
+        #
+        # The leveraged synthetic engine expects decimal rates and
+        # therefore must NOT perform another conversion.
+        # --------------------------------------------------------------
 
+        if "Close" in treasury_df.columns:
+            treasury_rate = treasury_df["Close"].copy()
+
+        elif "Adj Close" in treasury_df.columns:
+            treasury_rate = treasury_df["Adj Close"].copy()
+
+        else:
+            raise ValueError(
+                "TBILL history must contain "
+                "Close or Adj Close."
+            )
+
+        treasury_rate = pd.to_numeric(
+            treasury_rate,
+            errors="coerce",
+        )
+
+        treasury_rate = (
+            treasury_rate
+            .ffill()
+            .bfill()
+        )
+
+        if treasury_rate.empty:
+            raise ValueError(
+                "TBILL history is empty."
+            )
+
+        if treasury_rate.isna().any():
+            raise ValueError(
+                "TBILL history contains NaN values "
+                "after filling."
+            )
+
+        # FRED percentage points -> decimal annual rate.
+        #
+        # Example:
+        #     5.25 -> 0.0525
+        #
         treasury_rate = (
             treasury_rate / 100.0
         )
+
+        # Sanity check.
+        #
+        # Decimal annual Treasury rates should normally be well
+        # below 1.0 (100%).
+        #
+        maximum_rate = float(
+            treasury_rate.abs().max()
+        )
+
+        if not math.isfinite(maximum_rate):
+            raise ValueError(
+                "TBILL rate contains non-finite values."
+            )
+
+        if maximum_rate > 1.0:
+            raise ValueError(
+                "TBILL rate normalization appears incorrect. "
+                f"Maximum decimal annual rate = "
+                f"{maximum_rate:.6f}"
+            )
 
         if symbol == "QLD":
 
