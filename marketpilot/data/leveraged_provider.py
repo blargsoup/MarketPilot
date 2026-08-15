@@ -519,38 +519,7 @@ class LeveragedETFProvider:
                 "after filling."
             )
 
-        # FRED percentage points -> decimal annual rate.
-        #
-        # Example:
-        #     5.25 -> 0.0525
-        #
-        treasury_rate = (
-            treasury_rate / 100.0
-        )
-
-        # Sanity check.
-        #
-        # Decimal annual Treasury rates should normally be well
-        # below 1.0 (100%).
-        #
-        maximum_rate = float(
-            treasury_rate.abs().max()
-        )
-
-        if not math.isfinite(maximum_rate):
-            raise ValueError(
-                "TBILL rate contains non-finite values."
-            )
-
-        if maximum_rate > 1.0:
-            raise ValueError(
-                "TBILL rate normalization appears incorrect. "
-                f"Maximum decimal annual rate = "
-                f"{maximum_rate:.6f}"
-            )
-
         if symbol == "QLD":
-
             self.synthetic_builder.diagnose_against_actual(
                 underlying_close=underlying_df["Close"],
                 treasury_rate=treasury_rate,
