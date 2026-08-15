@@ -348,15 +348,71 @@ class LeveragedETFProvider:
         # Select underlying price series.
         # --------------------------------------------------------------
 
-        if (
-            "Adj Close"
-            in synthetic_underlying.columns
-        ):
+        # --------------------------------------------------------------
+        # Underlying price series.
+        #
+        # Keep both Close and Adj Close available.
+        #
+        # The production model will continue using the selected
+        # underlying_close series below.
+        #
+        # The diagnostic compares both series.
+        # --------------------------------------------------------------
 
-            underlying_close = (
+        underlying_close = (
+            synthetic_underlying[
+                "Close"
+            ]
+            .copy()
+        )
+
+        underlying_adj_close = None
+
+        if "Adj Close" in synthetic_underlying.columns:
+
+            underlying_adj_close = (
                 synthetic_underlying[
                     "Adj Close"
-                ].copy()
+                ]
+                .copy()
+            )
+
+        underlying_close = (
+            underlying_close
+            .dropna()
+        )
+
+        underlying_close = (
+            underlying_close[
+                underlying_close > 0
+            ]
+        )
+
+        if underlying_adj_close is not None:
+
+            underlying_adj_close = (
+                underlying_adj_close
+                .reindex(
+                    underlying_close.index
+                )
+            )
+
+            underlying_adj_close = (
+                underlying_adj_close
+                .dropna()
+            )
+
+            underlying_adj_close = (
+                underlying_adj_close[
+                    underlying_adj_close > 0
+                ]
+            )
+
+        if len(underlying_close) < 2:
+
+            raise ValueError(
+                f"Insufficient underlying history "
+                f"to synthesize {symbol}"
             )
 
         else:
@@ -428,6 +484,29 @@ class LeveragedETFProvider:
         # ==============================================================
         # 10. Build generic leveraged NAV
         # ==============================================================
+
+        # --------------------------------------------------------------
+        # Leveraged model diagnostics.
+        #
+        # This compares QQQ Close vs Adj Close, verifies daily returns,
+        # verifies Treasury financing, and calculates theoretical 2x NAV.
+        # --------------------------------------------------------------
+
+        if symbol == "QLD":
+
+            self.synthetic_builder.diagnose(
+                underlying_close=(
+                    underlying_close
+                ),
+                underlying_adj_close=(
+                    underlying_adj_close
+                ),
+                treasury_rate=(
+                    treasury_rate
+                ),
+                symbol=symbol,
+            )
+
 
         (
             nav,
