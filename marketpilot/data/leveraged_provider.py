@@ -481,6 +481,18 @@ class LeveragedETFProvider:
             treasury_rate / 100.0
         )
 
+        if symbol == "QLD":
+
+            self.synthetic_builder.diagnose_against_actual(
+                underlying_close=underlying_df["Close"],
+                treasury_rate=treasury_rate,
+                actual_history=actual_df,
+                symbol=symbol,
+            )
+
+
+
+
         # ==============================================================
         # 10. Build generic leveraged NAV
         # ==============================================================

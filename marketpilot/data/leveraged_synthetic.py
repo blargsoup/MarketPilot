@@ -322,6 +322,109 @@ class LeveragedSyntheticBuilder:
         )
 
         # --------------------------------------------------------------
+        # TREASURY RATE DEBUG DIAGNOSTICS
+        # --------------------------------------------------------------
+        logger.info("")
+        logger.info("Treasury Rate Debug Diagnostics:")
+        logger.info("-" * 60)
+
+        raw_treasury = pd.to_numeric(
+            treasury_rate,
+            errors="coerce",
+        )
+
+        logger.info(
+            f"Raw Treasury rows        : {len(raw_treasury)}"
+        )
+
+        logger.info(
+            f"Raw Treasury first date  : "
+            f"{raw_treasury.index.min()}"
+        )
+
+        logger.info(
+            f"Raw Treasury last date   : "
+            f"{raw_treasury.index.max()}"
+        )
+
+        logger.info(
+            f"Raw Treasury first value : "
+            f"{raw_treasury.iloc[0]:.8f}"
+        )
+
+        logger.info(
+            f"Raw Treasury last value  : "
+            f"{raw_treasury.iloc[-1]:.8f}"
+        )
+
+        logger.info(
+            f"Raw Treasury min         : "
+            f"{raw_treasury.min():.8f}"
+        )
+
+        logger.info(
+            f"Raw Treasury max         : "
+            f"{raw_treasury.max():.8f}"
+        )
+
+        logger.info("")
+        logger.info("Normalized Treasury:")
+        logger.info(
+            f"Normalized first         : "
+            f"{treasury_decimal.iloc[0] * 100:.8f}%"
+        )
+
+        logger.info(
+            f"Normalized last          : "
+            f"{treasury_decimal.iloc[-1] * 100:.8f}%"
+        )
+
+        logger.info(
+            f"Normalized min           : "
+            f"{treasury_decimal.min() * 100:.8f}%"
+        )
+
+        logger.info(
+            f"Normalized max           : "
+            f"{treasury_decimal.max() * 100:.8f}%"
+        )
+
+        logger.info("")
+        logger.info("Treasury Sample Values:")
+        logger.info("-" * 60)
+
+        sample_dates = [
+            raw_treasury.index.min(),
+            pd.Timestamp("2000-01-03"),
+            pd.Timestamp("2001-01-02"),
+            pd.Timestamp("2002-01-02"),
+            pd.Timestamp("2003-01-02"),
+            pd.Timestamp("2004-01-02"),
+            pd.Timestamp("2005-01-03"),
+            pd.Timestamp("2006-01-03"),
+            raw_treasury.index.max(),
+        ]
+
+        for date in sample_dates:
+
+            if date in raw_treasury.index:
+
+                raw_value = raw_treasury.loc[date]
+                normalized_value = (
+                    treasury_decimal.loc[date]
+                    if date in treasury_decimal.index
+                    else float("nan")
+                )
+
+                logger.info(
+                    f"{date.date()} | "
+                    f"Raw={raw_value:.8f} | "
+                    f"Normalized={normalized_value * 100:.8f}%"
+                )
+
+        logger.info("-" * 60)
+
+        # --------------------------------------------------------------
         # Align Treasury to underlying trading dates.
         # --------------------------------------------------------------
 
@@ -333,6 +436,55 @@ class LeveragedSyntheticBuilder:
             .ffill()
             .bfill()
         )
+
+        logger.info("")
+        logger.info("Treasury Financing Alignment:")
+        logger.info("-" * 60)
+
+        logger.info(
+            f"Underlying first date : "
+            f"{underlying_return.index.min()}"
+        )
+
+        logger.info(
+            f"Underlying last date  : "
+            f"{underlying_return.index.max()}"
+        )
+
+        logger.info(
+            f"Financing first date  : "
+            f"{financing_rate.index.min()}"
+        )
+
+        logger.info(
+            f"Financing last date   : "
+            f"{financing_rate.index.max()}"
+        )
+
+        logger.info(
+            f"Financing first rate  : "
+            f"{financing_rate.iloc[0] * 100:.8f}%"
+        )
+
+        logger.info(
+            f"Financing last rate   : "
+            f"{financing_rate.iloc[-1] * 100:.8f}%"
+        )
+
+        logger.info("")
+        logger.info("Financing Rate Checkpoints:")
+        logger.info("-" * 60)
+
+        for date in sample_dates:
+
+            if date in financing_rate.index:
+
+                logger.info(
+                    f"{date.date()} | "
+                    f"Financing={financing_rate.loc[date] * 100:.8f}%"
+                )
+
+        logger.info("-" * 60)
 
         if financing_rate.isna().any():
             raise ValueError(
@@ -1221,13 +1373,467 @@ class LeveragedSyntheticBuilder:
             "=================================================="
         )
 
-    # ==================================================================
-    # Legacy compatibility name
-    # ==================================================================
+    ############################
+    def diagnose_against_actual(
+        self,
+        underlying_close: pd.Series,
+        treasury_rate: pd.Series,
+        actual_history: pd.DataFrame,
+        symbol: str = "QLD",
+    ) -> pd.DataFrame:
+        """
+        Compare the theoretical synthetic leveraged ETF against
+        the actual ETF over the period where the actual ETF exists.
 
-    # Some older code may refer to this class under the old name.
-    # Keep the alias so existing imports don't break.
+        The comparison is normalized to 1.0 on the actual ETF's
+        first trading day.
 
+        Columns returned:
+
+            Actual Close
+            Actual Adj Close
+            Synthetic NAV
+            Pure 2x NAV
+            Actual Daily Return
+            Synthetic Daily Return
+            Pure 2x Daily Return
+            Synthetic Tracking Error
+            Cumulative Tracking Difference
+        """
+
+        logger.info("")
+        logger.info("=" * 70)
+        logger.info(
+            f"ACTUAL vs SYNTHETIC DIAGNOSTIC: {symbol}"
+        )
+        logger.info("=" * 70)
+
+        # --------------------------------------------------------------
+        # Normalize indexes
+        # --------------------------------------------------------------
+
+        underlying_close = underlying_close.copy()
+        treasury_rate = treasury_rate.copy()
+        actual = actual_history.copy()
+
+        underlying_close.index = pd.to_datetime(
+            underlying_close.index
+        )
+
+        treasury_rate.index = pd.to_datetime(
+            treasury_rate.index
+        )
+
+        actual.index = pd.to_datetime(
+            actual.index
+        )
+
+        underlying_close = (
+            underlying_close
+            .sort_index()
+            .dropna()
+        )
+
+        treasury_rate = (
+            treasury_rate
+            .sort_index()
+        )
+
+        actual = (
+            actual
+            .sort_index()
+        )
+
+        # --------------------------------------------------------------
+        # Normalize actual price columns
+        # --------------------------------------------------------------
+
+        if "Close" not in actual.columns:
+            raise ValueError(
+                f"{symbol}: actual history has no Close column."
+            )
+
+        if "Adj Close" not in actual.columns:
+            actual["Adj Close"] = actual["Close"]
+
+        actual["Close"] = pd.to_numeric(
+            actual["Close"],
+            errors="coerce",
+        )
+
+        actual["Adj Close"] = pd.to_numeric(
+            actual["Adj Close"],
+            errors="coerce",
+        )
+
+        actual = actual.dropna(
+            subset=["Close", "Adj Close"]
+        )
+
+        # --------------------------------------------------------------
+        # Actual ETF inception
+        # --------------------------------------------------------------
+
+        actual_start = actual.index.min()
+
+        logger.info(
+            f"Actual inception : {actual_start.date()}"
+        )
+
+        logger.info(
+            f"Actual last date  : "
+            f"{actual.index.max().date()}"
+        )
+
+        # --------------------------------------------------------------
+        # Build the full theoretical NAV.
+        #
+        # IMPORTANT:
+        #
+        # We use the FULL underlying history here, not merely the
+        # pre-inception portion used by the production builder.
+        #
+        # This allows us to compare the theoretical model directly
+        # against actual QLD after June 21, 2006.
+        # --------------------------------------------------------------
+
+        synthetic_nav, synthetic_return = (
+            self.build_nav(
+                underlying_close=underlying_close,
+                treasury_rate=treasury_rate,
+            )
+        )
+
+        # --------------------------------------------------------------
+        # Pure 2x theoretical return.
+        #
+        # This is useful because it separates:
+        #
+        #     leverage/path dependency
+        #
+        # from:
+        #
+        #     financing + expense drag
+        # --------------------------------------------------------------
+
+        underlying_return = (
+            underlying_close
+            .pct_change()
+        )
+
+        pure_2x_return = (
+            self.leverage
+            * underlying_return
+        )
+
+        pure_2x_return = (
+            pure_2x_return
+            .clip(lower=-0.999999)
+        )
+
+        pure_2x_nav = (
+            1.0 + pure_2x_return
+        ).cumprod()
+
+        # --------------------------------------------------------------
+        # Build comparison frame
+        # --------------------------------------------------------------
+
+        comparison = pd.DataFrame(
+            {
+                "Actual Close": actual["Close"],
+                "Actual Adj Close": actual["Adj Close"],
+                "Synthetic NAV": synthetic_nav,
+                "Pure 2x NAV": pure_2x_nav,
+            }
+        )
+
+        comparison = (
+            comparison
+            .dropna()
+            .loc[actual_start:]
+        )
+
+        if comparison.empty:
+            raise ValueError(
+                f"{symbol}: no overlapping dates between "
+                "synthetic and actual history."
+            )
+
+        # --------------------------------------------------------------
+        # Normalize everything to 1.0 at actual inception.
+        # --------------------------------------------------------------
+
+        for column in [
+            "Actual Close",
+            "Actual Adj Close",
+            "Synthetic NAV",
+            "Pure 2x NAV",
+        ]:
+
+            first_value = float(
+                comparison[column].iloc[0]
+            )
+
+            if (
+                not math.isfinite(first_value)
+                or first_value <= 0
+            ):
+                raise ValueError(
+                    f"{symbol}: invalid first value for "
+                    f"{column}: {first_value}"
+                )
+
+            comparison[column] = (
+                comparison[column]
+                / first_value
+            )
+
+        # --------------------------------------------------------------
+        # Daily returns
+        # --------------------------------------------------------------
+
+        comparison[
+            "Actual Daily Return"
+        ] = (
+            comparison["Actual Close"]
+            .pct_change()
+        )
+
+        comparison[
+            "Actual Adj Daily Return"
+        ] = (
+            comparison["Actual Adj Close"]
+            .pct_change()
+        )
+
+        comparison[
+            "Synthetic Daily Return"
+        ] = (
+            comparison["Synthetic NAV"]
+            .pct_change()
+        )
+
+        comparison[
+            "Pure 2x Daily Return"
+        ] = (
+            comparison["Pure 2x NAV"]
+            .pct_change()
+        )
+
+        # --------------------------------------------------------------
+        # Tracking error
+        # --------------------------------------------------------------
+
+        comparison[
+            "Synthetic Tracking Error"
+        ] = (
+            comparison["Synthetic Daily Return"]
+            - comparison["Actual Daily Return"]
+        )
+
+        comparison[
+            "Pure 2x Tracking Error"
+        ] = (
+            comparison["Pure 2x Daily Return"]
+            - comparison["Actual Daily Return"]
+        )
+
+        # --------------------------------------------------------------
+        # Cumulative tracking difference
+        # --------------------------------------------------------------
+
+        comparison[
+            "Synthetic vs Actual"
+        ] = (
+            comparison["Synthetic NAV"]
+            / comparison["Actual Close"]
+            - 1.0
+        )
+
+        comparison[
+            "Pure 2x vs Actual"
+        ] = (
+            comparison["Pure 2x NAV"]
+            / comparison["Actual Close"]
+            - 1.0
+        )
+
+        # ==============================================================
+        # LOG SUMMARY
+        # ==============================================================
+
+        logger.info("")
+        logger.info(
+            "NORMALIZED PERFORMANCE"
+        )
+        logger.info("-" * 70)
+
+        logger.info(
+            f"Actual Close       : "
+            f"{comparison['Actual Close'].iloc[-1]:.6f}x"
+        )
+
+        logger.info(
+            f"Actual Adj Close   : "
+            f"{comparison['Actual Adj Close'].iloc[-1]:.6f}x"
+        )
+
+        logger.info(
+            f"Pure 2x QQQ        : "
+            f"{comparison['Pure 2x NAV'].iloc[-1]:.6f}x"
+        )
+
+        logger.info(
+            f"Full synthetic     : "
+            f"{comparison['Synthetic NAV'].iloc[-1]:.6f}x"
+        )
+
+        logger.info("")
+
+        logger.info(
+            f"Pure 2x vs Actual  : "
+            f"{comparison['Pure 2x vs Actual'].iloc[-1] * 100:.4f}%"
+        )
+
+        logger.info(
+            f"Synthetic vs Actual: "
+            f"{comparison['Synthetic vs Actual'].iloc[-1] * 100:.4f}%"
+        )
+
+        # ==============================================================
+        # DAILY TRACKING STATISTICS
+        # ==============================================================
+
+        daily = comparison.dropna(
+            subset=[
+                "Actual Daily Return",
+                "Synthetic Daily Return",
+                "Pure 2x Daily Return",
+            ]
+        )
+
+        if not daily.empty:
+
+            synthetic_error = (
+                daily["Synthetic Tracking Error"]
+            )
+
+            pure_error = (
+                daily["Pure 2x Tracking Error"]
+            )
+
+            logger.info("")
+            logger.info(
+                "DAILY TRACKING STATISTICS"
+            )
+            logger.info("-" * 70)
+
+            logger.info(
+                f"Trading days        : "
+                f"{len(daily)}"
+            )
+
+            logger.info(
+                f"Synthetic correlation: "
+                f"{daily['Actual Daily Return'].corr(
+                    daily['Synthetic Daily Return']
+                ):.6f}"
+            )
+
+            logger.info(
+                f"Pure 2x correlation : "
+                f"{daily['Actual Daily Return'].corr(
+                    daily['Pure 2x Daily Return']
+                ):.6f}"
+            )
+
+            logger.info(
+                f"Synthetic mean error: "
+                f"{synthetic_error.mean() * 100:.6f}%"
+            )
+
+            logger.info(
+                f"Synthetic RMSE     : "
+                f"{math.sqrt(
+                    (synthetic_error ** 2).mean()
+                ) * 100:.6f}%"
+            )
+
+            logger.info(
+                f"Synthetic max error: "
+                f"{synthetic_error.abs().max() * 100:.6f}%"
+            )
+
+            logger.info(
+                f"Pure 2x mean error : "
+                f"{pure_error.mean() * 100:.6f}%"
+            )
+
+            logger.info(
+                f"Pure 2x RMSE       : "
+                f"{math.sqrt(
+                    (pure_error ** 2).mean()
+                ) * 100:.6f}%"
+            )
+
+        # ==============================================================
+        # CHECKPOINTS
+        # ==============================================================
+
+        logger.info("")
+        logger.info(
+            "HISTORICAL CHECKPOINTS"
+        )
+        logger.info("-" * 70)
+
+        checkpoints = [
+            1,
+            5,
+            20,
+            30,
+            60,
+            126,
+            252,
+            504,
+            756,
+            1000,
+            1500,
+            2000,
+            3000,
+            4000,
+        ]
+
+        for days in checkpoints:
+
+            if days >= len(comparison):
+                continue
+
+            row = comparison.iloc[days]
+
+            logger.info(
+                f"{days:4d} days | "
+                f"{row.name.date()} | "
+                f"Actual={row['Actual Close']:.6f}x | "
+                f"Pure2x={row['Pure 2x NAV']:.6f}x | "
+                f"Synthetic={row['Synthetic NAV']:.6f}x | "
+                f"Syn-Actual="
+                f"{row['Synthetic vs Actual'] * 100:+.3f}%"
+            )
+
+        # ==============================================================
+        # FINAL SUMMARY
+        # ==============================================================
+
+        logger.info("")
+        logger.info("=" * 70)
+        logger.info(
+            f"END ACTUAL vs SYNTHETIC DIAGNOSTIC: {symbol}"
+        )
+        logger.info("=" * 70)
+        logger.info("")
+
+        return comparison
     
 # ----------------------------------------------------------------------
 # Backwards-compatible class alias
