@@ -175,20 +175,57 @@ class IndicatorEngine:
     ####################################################################
 
     @property
-    def credit_stress(self):
+    def credit_stress(self) -> float | None:
 
         if "credit" not in self._cache:
 
-            hyg = self.market["HYG"].close
+            #
+            # Credit stress is optional.
+            #
+            # If HYG or LQD is unavailable at this point in history,
+            # credit stress simply does not participate in the strategy.
+            #
 
-            lqd = self.market["LQD"].close
+            if (
+                "HYG" not in self.market.keys()
+                or "LQD" not in self.market.keys()
+            ):
 
-            value = credit_stress(
-                hyg,
-                lqd,
-            ).iloc[-1]
+                self._cache["credit"] = None
 
-            self._cache["credit"] = float(value)
+            else:
+
+                hyg = self.market["HYG"].close
+                lqd = self.market["LQD"].close
+
+                #
+                # We need enough overlapping observations to calculate
+                # the credit-stress indicator.
+                #
+
+                if hyg.empty or lqd.empty:
+
+                    self._cache["credit"] = None
+
+                else:
+
+                    value = credit_stress(
+                        hyg,
+                        lqd,
+                    ).iloc[-1]
+
+                    try:
+
+                        value = float(value)
+
+                    except (
+                        TypeError,
+                        ValueError,
+                    ):
+
+                        value = None
+
+                    self._cache["credit"] = value
 
         return self._cache["credit"]
 

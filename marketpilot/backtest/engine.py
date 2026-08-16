@@ -67,8 +67,6 @@ class BacktestEngine:
             strategy.profile.aggressive_asset,
             strategy.profile.moderate_asset,
             strategy.profile.cash_asset,
-            "HYG",
-            "LQD",
         ]
 
         required_symbols = list(
