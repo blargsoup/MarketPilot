@@ -34,12 +34,16 @@ class ForwardCompounder:
     """
     Compounds a strategy forward through time using daily asset returns.
 
-    Real assets:
-        The daily return is calculated directly from the asset's Close.
+    All assets:
+    The daily economic return is calculated from the historical
+    economic value supplied by the market data provider.
 
-    Synthetic leveraged assets:
-        The daily return is calculated from the underlying asset's return
-        multiplied by the specified leverage.
+    Synthetic leveraged ETFs:
+        TQQQ, QLD, etc. are supplied by SyntheticDataProvider as
+        authoritative historical datasets and are treated exactly like
+        normal assets.
+
+    No leveraged ETF returns are reconstructed here.
 
     The strategy state determines which asset is held on each day.
 
@@ -57,7 +61,6 @@ class ForwardCompounder:
         self,
         starting_value: float = 100_000.0,
         state_assets: Optional[Dict[str, str]] = None,
-        leveraged_assets: Optional[Dict[str, dict]] = None,
     ) -> None:
 
         self.starting_value = starting_value
@@ -66,28 +69,6 @@ class ForwardCompounder:
             "AGGRESSIVE": "TQQQ",
             "MODERATE": "QLD",
             "DEFENSIVE": "TBILL",
-        }
-
-        # Synthetic leveraged assets.
-        #
-        # These do NOT require a synthetic price history.
-        #
-        # They are calculated directly from the underlying asset's
-        # daily return.
-        #
-        # Example:
-        #
-        # QQQ + 1% -> TQQQ approximately +3%
-        #
-        self.leveraged_assets = leveraged_assets or {
-            "TQQQ": {
-                "underlying": "QQQ",
-                "leverage": 3.0,
-            },
-            "QLD": {
-                "underlying": "QQQ",
-                "leverage": 2.0,
-            },
         }
 
     # ------------------------------------------------------------------
@@ -101,70 +82,16 @@ class ForwardCompounder:
         price_column: str,
     ) -> pd.Series:
         """
-        Return the daily return series for an asset.
+        Return the daily economic return series for an asset.
 
-        For real assets:
-            return = price.pct_change()
+        The market data provider is authoritative.
 
-        For synthetic leveraged assets:
-            return = underlying_return * leverage
+        Synthetic leveraged ETFs such as TQQQ and QLD are supplied by
+        SyntheticDataProvider as historical datasets, so they are treated
+        exactly like any other asset here.
 
-        This deliberately avoids reconstructing a synthetic ETF price.
+        No leverage reconstruction is performed.
         """
-
-        # --------------------------------------------------------------
-        # Synthetic leveraged asset
-        # --------------------------------------------------------------
-
-        if symbol in self.leveraged_assets:
-
-            config = self.leveraged_assets[symbol]
-
-            underlying_symbol = config["underlying"]
-            leverage = float(config["leverage"])
-
-            if underlying_symbol not in market:
-                raise ValueError(
-                    f"Underlying asset '{underlying_symbol}' required "
-                    f"for synthetic asset '{symbol}' was not found "
-                    f"in market data."
-                )
-
-            underlying_history = market[underlying_symbol]
-
-            # MarketHistory objects contain the actual DataFrame
-            # in .data.
-            underlying_prices = (
-                underlying_history.data[price_column]
-                .astype(float)
-            )
-
-            underlying_prices.index = pd.to_datetime(
-                underlying_prices.index
-            )
-
-            underlying_prices = underlying_prices.sort_index()
-
-            underlying_returns = (
-                underlying_prices.pct_change()
-            )
-
-            synthetic_returns = (
-                leverage * underlying_returns
-            )
-
-            logger.info(
-                "Synthetic return model: %s = %.1fx %s",
-                symbol,
-                leverage,
-                underlying_symbol,
-            )
-
-            return synthetic_returns
-
-        # --------------------------------------------------------------
-        # Real asset
-        # --------------------------------------------------------------
 
         if symbol not in market:
             raise ValueError(
@@ -174,15 +101,53 @@ class ForwardCompounder:
 
         history = market[symbol]
 
-        prices = (
-            history.data[price_column]
-            .astype(float)
+        #
+        # Use the economic value series when one is available.
+        #
+        # Synthetic leveraged datasets may contain NAV, which represents
+        # the economic investment value independently of share-price
+        # denomination and splits.
+        #
+
+        if "NAV" in history.data.columns:
+
+            prices = (
+                history.data["NAV"]
+                .astype(float)
+            )
+
+        else:
+
+            if price_column not in history.data.columns:
+                raise ValueError(
+                    f"Asset '{symbol}' does not contain "
+                    f"required price column '{price_column}'."
+                )
+
+            prices = (
+                history.data[price_column]
+                .astype(float)
+            )
+
+        prices.index = pd.to_datetime(
+            prices.index
         )
 
-        prices.index = pd.to_datetime(prices.index)
         prices = prices.sort_index()
 
-        return prices.pct_change()
+        if prices.empty:
+            raise ValueError(
+                f"Asset '{symbol}' contains no price data."
+            )
+
+        returns = prices.pct_change()
+
+        logger.info(
+            "Using supplied historical return series: %s",
+            symbol,
+        )
+
+        return returns
 
     # ------------------------------------------------------------------
     # Run
