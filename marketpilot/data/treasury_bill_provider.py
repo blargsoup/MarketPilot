@@ -237,6 +237,7 @@ class TreasuryBillProvider(MarketDataProvider):
                 "High",
                 "Low",
                 "Close",
+                "Rate",
                 "Volume",
             ]
         ]

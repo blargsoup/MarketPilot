@@ -111,12 +111,19 @@ class SyntheticDataProvider(MarketDataProvider):
 
         # --------------------------------------------------------------
         # Parse dates.
+        #
+        # MarketPilot uses canonical daily timestamps:
+        # timezone-naive midnight representing the trading date.
+        #
+        # The repository TSV files may contain timestamps such as
+        # 16:00:00. Normalize them so they intersect correctly with
+        # other daily providers such as FRED.
         # --------------------------------------------------------------
 
         df["Date"] = pd.to_datetime(
             df["Date"],
             errors="coerce",
-        )
+        ).dt.normalize()
 
         if df["Date"].isna().any():
             bad_rows = int(
