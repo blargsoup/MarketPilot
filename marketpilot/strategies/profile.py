@@ -185,7 +185,7 @@ SEMICONDUCTOR_PROFILE = StrategyProfile(
 
     ),
 
-    cash_asset="TBILL",
+    cash_asset="CASH",
 
 )
 
@@ -215,6 +215,6 @@ SP500_PROFILE = StrategyProfile(
 
     ),
 
-    cash_asset="TBILL",
+    cash_asset="CASH",
 
 )
