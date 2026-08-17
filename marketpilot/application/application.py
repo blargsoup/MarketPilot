@@ -38,6 +38,7 @@ from marketpilot.reports import (
     ConsoleReport,
     DashboardReport,
     TradeReport,
+    CheckpointReport,
 )
 from marketpilot.diagnostics.strategy_report import StrategyReport
 
@@ -412,4 +413,31 @@ class Application:
 
             backtest_result.diagnostics,
 
+        )
+
+        #
+        # Historical checkpoint report
+        #
+
+        checkpoint_report = CheckpointReport()
+
+        checkpoint_path = checkpoint_report.generate(
+
+            market,
+
+            backtest_result,
+
+        )
+
+        logger.info("")
+        logger.info("Historical Checkpoints")
+        logger.info("------------------------------")
+
+        logger.info(
+            "CSV exported to:"
+        )
+
+        logger.info(
+            "    %s",
+            checkpoint_path,
         )
