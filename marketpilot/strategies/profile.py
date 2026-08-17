@@ -218,3 +218,55 @@ SP500_PROFILE = StrategyProfile(
     cash_asset="CASH",
 
 )
+
+##############################################################################
+# NASDAQ - Cash Defensive
+##############################################################################
+
+NASDAQ_CASH_PROFILE = StrategyProfile(
+
+    name="NASDAQ Cash Defensive",
+
+    signal_asset="QQQ",
+
+    trend_asset="SPY",
+
+    aggressive_asset="TQQQ",
+
+    moderate_asset="QLD",
+
+    defensive_assets=(),
+
+    cash_asset="CASH",
+
+)
+
+
+##############################################################################
+# NASDAQ - QQQ Moderate
+##############################################################################
+
+NASDAQ_QQQ_PROFILE = StrategyProfile(
+
+    name="NASDAQ QQQ Moderate",
+
+    signal_asset="QQQ",
+
+    trend_asset="SPY",
+
+    aggressive_asset="TQQQ",
+
+    moderate_asset="QQQ",
+
+    defensive_assets=(
+
+        "TLT",
+        "GLD",
+        "XLU",
+        "XLE",
+
+    ),
+
+    cash_asset="CASH",
+
+)

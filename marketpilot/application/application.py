@@ -12,8 +12,10 @@ from marketpilot.strategies import (
     BuyAndHoldStrategy,
     PortfolioState,
     NASDAQ_PROFILE,
+    NASDAQ_CASH_PROFILE,
+    NASDAQ_QQQ_PROFILE,
     SEMICONDUCTOR_PROFILE,
-    SP500_PROFILE
+    SP500_PROFILE,
 )
 from marketpilot.defensive import (
     DefensiveSelector,
@@ -278,8 +280,17 @@ class Application:
                 #
                 # A-RVol Profiles
                 #
+
                 ARVolStrategy(
                     NASDAQ_PROFILE,
+                ),
+
+                ARVolStrategy(
+                    NASDAQ_CASH_PROFILE,
+                ),
+
+                ARVolStrategy(
+                    NASDAQ_QQQ_PROFILE,
                 ),
 
                 ARVolStrategy(
@@ -289,16 +300,6 @@ class Application:
                 ARVolStrategy(
                     SP500_PROFILE,
                 ),
-
-                #
-                # Buy & Hold Benchmarks
-                #
-
-                BuyAndHoldStrategy(NASDAQ_PROFILE),
-
-                BuyAndHoldStrategy(SEMICONDUCTOR_PROFILE),
-
-                BuyAndHoldStrategy(SP500_PROFILE),
 
             ],
 

@@ -7,6 +7,8 @@ by the selected market profile.
 
 from .base import Strategy
 from .profile import NASDAQ_PROFILE
+from .profile import NASDAQ_CASH_PROFILE
+from .profile import NASDAQ_QQQ_PROFILE
 from .result import StrategyResult
 from .state import PortfolioState
 
