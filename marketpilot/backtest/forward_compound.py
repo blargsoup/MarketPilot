@@ -99,6 +99,65 @@ class ForwardCompounder:
         No leverage reconstruction is performed.
         """
 
+        # --------------------------------------------------------------
+        # Synthetic cash
+        # --------------------------------------------------------------
+
+        if symbol == "CASH":
+
+            if market:
+
+                #
+                # Use the market's trading calendar.
+                #
+                # We use QQQ because it is guaranteed to be part
+                # of the strategy's core universe.
+                #
+
+                if "QQQ" not in market:
+
+                    raise ValueError(
+                        "QQQ is required to build the synthetic "
+                        "CASH return series."
+                    )
+
+                index = market["QQQ"].data.index
+
+            else:
+
+                raise ValueError(
+                    "Market data is required to build "
+                    "the synthetic CASH return series."
+                )
+
+            index = pd.to_datetime(index)
+            index = index.sort_values()
+
+            #
+            # Convert annual return to an equivalent daily return.
+            #
+            # This compounds to approximately 2% over one year.
+            #
+
+            daily_rate = (
+                1.0 + self.cash_annual_rate
+            ) ** (
+                1.0 / 365.25
+            ) - 1.0
+
+            cash_returns = pd.Series(
+                daily_rate,
+                index=index,
+                dtype=float,
+            )
+
+            logger.info(
+                "Synthetic cash return model: %.2f%% annual",
+                self.cash_annual_rate * 100,
+            )
+
+            return cash_returns
+
         if symbol not in market:
             raise ValueError(
                 f"Required asset '{symbol}' was not found "
