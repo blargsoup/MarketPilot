@@ -218,8 +218,9 @@ class Application:
             state_assets={
                 "AGGRESSIVE": "TQQQ",
                 "MODERATE": "QLD",
-                "DEFENSIVE": "TBILL",
+                "DEFENSIVE": "CASH",
             },
+            cash_annual_rate=0.02,
         )
 
         forward_result = forward_compounder.run(

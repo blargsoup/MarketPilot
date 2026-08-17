@@ -110,10 +110,18 @@ class ConsoleReport:
             signals.spy_distance * 100,
         )
 
-        logger.info(
-            "Credit (20d)    : %.2f%%",
-            signals.credit * 100,
-        )
+        if signals.credit is None:
+
+            logger.info(
+                "Credit (20d)    : N/A"
+            )
+
+        else:
+
+            logger.info(
+                "Credit (20d)    : %.2f%%",
+                signals.credit * 100,
+            )
 
         #
         # Boolean Signals
@@ -138,10 +146,18 @@ class ConsoleReport:
             signals.spy_breakdown,
         )
 
-        logger.info(
-            "Credit Crisis  : %s",
-            signals.credit_crisis,
-        )
+        if signals.credit is None:
+
+            logger.info(
+                "Credit Crisis  : N/A (no HYG/LQD data)"
+            )
+
+        else:
+
+            logger.info(
+                "Credit Crisis  : %s",
+                signals.credit_crisis,
+            )
 
         logger.info(
             "Donchian Break : %s",

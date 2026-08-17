@@ -61,9 +61,15 @@ class ForwardCompounder:
         self,
         starting_value: float = 100_000.0,
         state_assets: Optional[Dict[str, str]] = None,
+        leveraged_assets: Optional[Dict[str, dict]] = None,
+        cash_annual_rate: float = 0.02,
     ) -> None:
 
         self.starting_value = starting_value
+
+        self.cash_annual_rate = float(
+            cash_annual_rate
+        )
 
         self.state_assets = state_assets or {
             "AGGRESSIVE": "TQQQ",

@@ -71,7 +71,6 @@ class SignalEngine:
         self.donchian = indicators.donchian_break
 
         self.momentum30 = indicators.momentum_30
-
         self.momentum90 = indicators.momentum_90
 
         ###############################################################
@@ -180,9 +179,22 @@ class SignalEngine:
         # Credit
         ###############################################################
 
-        self.credit_crisis = (
-            self.credit < self.profile.credit_threshold
-        )
+        if self.credit is None:
+
+            #
+            # Credit data is unavailable for this historical period.
+            #
+            # Treat credit stress as inactive rather than allowing
+            # missing HYG/LQD history to break the backtest.
+            #
+
+            self.credit_crisis = False
+
+        else:
+
+            self.credit_crisis = (
+                self.credit < self.profile.credit_threshold
+            )
 
         ###############################################################
         # Donchian

@@ -155,7 +155,7 @@ NASDAQ_PROFILE = StrategyProfile(
 
     ),
 
-    cash_asset="TBILL",
+    cash_asset="CASH",
 
 )
 
