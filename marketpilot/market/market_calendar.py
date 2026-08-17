@@ -33,6 +33,15 @@ class MarketCalendar:
 
         for symbol in required_symbols:
 
+            #
+            # Synthetic assets such as CASH do not have
+            # historical market data. They use the trading
+            # calendar supplied by the real market assets.
+            #
+
+            if symbol == "CASH":
+                continue
+
             if symbol not in market:
                 raise KeyError(
                     f"Required market symbol "
