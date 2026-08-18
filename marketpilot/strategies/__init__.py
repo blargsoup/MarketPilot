@@ -9,6 +9,9 @@ from .profile import (
     NASDAQ_QQQ_PROFILE,
     NASDAQ_CASH_PROFILE,
     NASDAQ_2STATE_PROFILE,
+    NASDAQ_2STATE_CASH_PROFILE,
+    NASDAQ_2STATE_PSQ_PROFILE,
+    NASDAQ_2STATE_SQQQ_PROFILE,
 )
 
 from .parameters import ARVolParameters
@@ -35,6 +38,12 @@ __all__ = [
     "NASDAQ_2STATE_PROFILE"
 
     "NASDAQ_QQQ_PROFILE",
+
+    "NASDAQ_2STATE_CASH_PROFILE",
+
+    "NASDAQ_2STATE_PSQ_PROFILE",
+
+    "NASDAQ_2STATE_SQQQ_PROFILE",
 
     "ARVolParameters",
 

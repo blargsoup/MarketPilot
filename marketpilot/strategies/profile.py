@@ -302,3 +302,65 @@ NASDAQ_QQQ_PROFILE = StrategyProfile(
     cash_asset="CASH",
 
 )
+
+##############################################################################
+# NASDAQ 2-STATE CASH
+##############################################################################
+
+NASDAQ_2STATE_CASH_PROFILE = StrategyProfile(
+
+    name="NASDAQ 2-State Cash",
+
+    signal_asset="QQQ",
+    trend_asset="SPY",
+
+    aggressive_asset="TQQQ",
+    moderate_asset="TQQQ",
+
+    defensive_assets=(),
+
+    cash_asset="CASH",
+
+)
+
+
+##############################################################################
+# NASDAQ 2-STATE PSQ
+##############################################################################
+
+NASDAQ_2STATE_PSQ_PROFILE = StrategyProfile(
+
+    name="NASDAQ 2-State PSQ",
+
+    signal_asset="QQQ",
+    trend_asset="SPY",
+
+    aggressive_asset="TQQQ",
+    moderate_asset="TQQQ",
+
+    defensive_assets=(),
+
+    cash_asset="PSQ",
+
+)
+
+
+##############################################################################
+# NASDAQ 2-STATE SQQQ
+##############################################################################
+
+NASDAQ_2STATE_SQQQ_PROFILE = StrategyProfile(
+
+    name="NASDAQ 2-State SQQQ",
+
+    signal_asset="QQQ",
+    trend_asset="SPY",
+
+    aggressive_asset="TQQQ",
+    moderate_asset="TQQQ",
+
+    defensive_assets=(),
+
+    cash_asset="SQQQ",
+
+)
