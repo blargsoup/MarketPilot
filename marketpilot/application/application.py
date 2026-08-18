@@ -18,7 +18,7 @@ from marketpilot.strategies import (
     SEMICONDUCTOR_PROFILE,
     SP500_PROFILE,
     NASDAQ_2STATE_CASH_PROFILE,
-    NASDAQ_2STATE_PSQ_PROFILE,
+    #NASDAQ_2STATE_PSQ_PROFILE,
     NASDAQ_2STATE_SQQQ_PROFILE,
 )
 from marketpilot.defensive import (
@@ -314,9 +314,9 @@ class Application:
                     NASDAQ_2STATE_CASH_PROFILE,
                 ),
 
-                ARVolStrategy(
-                    NASDAQ_2STATE_PSQ_PROFILE,
-                ),
+                #ARVolStrategy(
+                #    NASDAQ_2STATE_PSQ_PROFILE,
+                #),
 
                 ARVolStrategy(
                     NASDAQ_2STATE_SQQQ_PROFILE,

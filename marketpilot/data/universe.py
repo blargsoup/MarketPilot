@@ -62,6 +62,16 @@ MARKET_UNIVERSE = [
         "NASDAQ",
     ),
 
+    Asset(
+        "SQQQ",
+        "ProShares UltraPro Short QQQ",
+        "NASDAQ 3x Inverse Leveraged",
+        "NASDAQ",
+        3,
+        True,
+        "NASDAQ",
+    ),
+
     #
     # S&P 500
     #

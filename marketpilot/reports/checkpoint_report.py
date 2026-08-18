@@ -412,6 +412,42 @@ class CheckpointReport:
             rows
         )
 
+        #
+        # Sort chronologically within each strategy.
+        #
+
+        dataframe["Date"] = pd.to_datetime(
+            dataframe["Date"]
+        )
+
+        dataframe = dataframe.sort_values(
+            [
+                "Strategy",
+                "Date",
+            ]
+        )
+
+        #
+        # Return from the previous checkpoint,
+        # calculated independently for each strategy.
+        #
+
+        dataframe["Checkpoint Return"] = (
+            dataframe
+            .groupby("Strategy")["Portfolio"]
+            .pct_change()
+        )
+
+        #
+        # Format Date back to YYYY-MM-DD for CSV.
+        #
+
+        dataframe["Date"] = (
+            dataframe["Date"]
+            .dt.strftime("%Y-%m-%d")
+        )
+
+
         self.output_path.parent.mkdir(
             parents=True,
             exist_ok=True,
