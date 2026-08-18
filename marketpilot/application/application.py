@@ -464,8 +464,7 @@ class Application:
 
         checkpoint_report = CheckpointReport()
 
-        checkpoint_path = checkpoint_report.generate(
-            market,
+        checkpoint_paths = checkpoint_report.generate(
             strategy_comparisons,
         )
 
