@@ -5,3 +5,4 @@ from .checkpoint_report import CheckpointReport
 from marketpilot.reports.checkpoint_analytics import (
     CheckpointAnalytics,
 )
+from .signal_report import SignalReport

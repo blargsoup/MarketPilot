@@ -46,6 +46,7 @@ from marketpilot.reports import (
 )
 from marketpilot.diagnostics.strategy_report import StrategyReport
 from marketpilot.reports import CheckpointReport
+from marketpilot.reports import SignalReport
 
 
 class Application:
@@ -348,6 +349,29 @@ class Application:
             "Detailed CSV  : %s",
             detailed_checkpoint_path,
         )
+
+        #
+        # Signal / transition analytics
+        #
+
+        signal_report = SignalReport()
+
+        signal_paths = signal_report.generate(
+            strategy_comparisons,
+        )
+
+        logger.info("")
+        logger.info(
+            "Signal analytics exported:"
+        )
+
+        for name, path in signal_paths.items():
+
+            logger.info(
+                "    %-24s %s",
+                name,
+                path,
+            )
 
         # ------------------------------------------------------------
         # Benchmark calculations
