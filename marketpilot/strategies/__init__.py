@@ -7,7 +7,8 @@ from .profile import (
     SEMICONDUCTOR_PROFILE,
     SP500_PROFILE,
     NASDAQ_QQQ_PROFILE,
-    NASDAQ_CASH_PROFILE
+    NASDAQ_CASH_PROFILE,
+    NASDAQ_2STATE_PROFILE,
 )
 
 from .parameters import ARVolParameters
@@ -30,6 +31,8 @@ __all__ = [
     "SP500_PROFILE",
 
     "NASDAQ_CASH_PROFILE",
+
+    "NASDAQ_2STATE_PROFILE"
 
     "NASDAQ_QQQ_PROFILE",
 

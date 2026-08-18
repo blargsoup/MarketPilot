@@ -220,6 +220,38 @@ SP500_PROFILE = StrategyProfile(
 )
 
 ##############################################################################
+# NASDAQ — Two State
+##############################################################################
+
+NASDAQ_2STATE_PROFILE = StrategyProfile(
+
+    name="NASDAQ 2-State",
+
+    signal_asset="QQQ",
+
+    trend_asset="SPY",
+
+    aggressive_asset="TQQQ",
+
+    # Moderate intentionally uses TQQQ.
+    #
+    # This removes the QLD middle state.
+    # The strategy can still transition internally from
+    # AGGRESSIVE -> MODERATE, but the portfolio remains in TQQQ.
+    moderate_asset="TQQQ",
+
+    defensive_assets=(
+        "TLT",
+        "GLD",
+        "XLU",
+        "XLE",
+    ),
+
+    cash_asset="TBILL",
+
+)
+
+##############################################################################
 # NASDAQ - Cash Defensive
 ##############################################################################
 

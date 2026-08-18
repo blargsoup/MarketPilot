@@ -13,6 +13,7 @@ from marketpilot.strategies import (
     PortfolioState,
     NASDAQ_PROFILE,
     NASDAQ_CASH_PROFILE,
+    NASDAQ_2STATE_PROFILE,
     NASDAQ_QQQ_PROFILE,
     SEMICONDUCTOR_PROFILE,
     SP500_PROFILE,
@@ -284,6 +285,10 @@ class Application:
 
                 ARVolStrategy(
                     NASDAQ_PROFILE,
+                ),
+
+                ARVolStrategy(
+                    NASDAQ_2STATE_PROFILE,
                 ),
 
                 ARVolStrategy(
