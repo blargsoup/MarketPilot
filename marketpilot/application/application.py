@@ -45,6 +45,7 @@ from marketpilot.reports import (
     CheckpointReport,
 )
 from marketpilot.diagnostics.strategy_report import StrategyReport
+from marketpilot.reports import CheckpointReport
 
 
 class Application:
@@ -326,6 +327,28 @@ class Application:
 
         )
 
+        checkpoint_report = CheckpointReport()
+
+        checkpoint_path, detailed_checkpoint_path = (
+            checkpoint_report.generate(
+                strategy_comparisons
+            )
+        )
+
+        logger.info("")
+        logger.info("Checkpoint Analysis")
+        logger.info("------------------------------")
+
+        logger.info(
+            "Compact CSV   : %s",
+            checkpoint_path,
+        )
+
+        logger.info(
+            "Detailed CSV  : %s",
+            detailed_checkpoint_path,
+        )
+
         # ------------------------------------------------------------
         # Benchmark calculations
         #
@@ -442,11 +465,8 @@ class Application:
         checkpoint_report = CheckpointReport()
 
         checkpoint_path = checkpoint_report.generate(
-
             market,
-
             strategy_comparisons,
-
         )
 
         logger.info("")
