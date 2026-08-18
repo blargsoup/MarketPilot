@@ -1,9 +1,8 @@
 """
 Historical checkpoint reporting.
 
-Produces a CSV containing strategy state, portfolio value,
-drawdown, market indicators, and benchmark information at
-important historical dates.
+Produces a CSV comparing important historical dates across
+multiple strategy variants and buy-and-hold benchmarks.
 """
 
 from pathlib import Path
@@ -36,177 +35,158 @@ class CheckpointReport:
 
         self.output_path = Path(output_path)
 
-    def generate(
-        self,
-        market,
-        backtest_results,
+    @staticmethod
+    def _date_lookup(
+        equity_curve,
     ):
 
-        rows = []
-
-        #
-        # Build lookup by date.
-        #
-
-        simulations = {
-            simulation.context.current_date.normalize():
-                simulation
-            for simulation in backtest_results.simulations
-        }
-
-        #
-        # Build equity lookup.
-        #
-
-        equity = {
+        return {
             point.date.normalize(): point
-            for point in backtest_results.equity_curve
+            for point in equity_curve
         }
 
-        #
-        # Build high-water-mark lookup.
-        #
+    @staticmethod
+    def _drawdown_lookup(
+        equity_curve,
+    ):
 
         high_water = 0.0
-        drawdown_lookup = {}
 
-        for point in backtest_results.equity_curve:
+        drawdowns = {}
 
-            value = point.equity
+        for point in equity_curve:
 
-            if value > high_water:
-                high_water = value
+            equity = point.equity
+
+            if equity > high_water:
+                high_water = equity
 
             if high_water > 0:
+
                 drawdown = (
-                    value / high_water
+                    equity / high_water
                 ) - 1.0
 
             else:
+
                 drawdown = 0.0
 
-            drawdown_lookup[
+            drawdowns[
                 point.date.normalize()
             ] = drawdown
 
+        return drawdowns
+
+    @staticmethod
+    def _simulation_lookup(
+        backtest,
+    ):
+
+        return {
+            simulation.context.current_date.normalize():
+                simulation
+            for simulation in backtest.simulations
+        }
+
+    @staticmethod
+    def _find_checkpoint(
+        lookup,
+        date,
+    ):
+
         #
-        # Process checkpoints.
+        # Exact trading day.
         #
+
+        if date in lookup:
+
+            return date
+
+        #
+        # Weekend / holiday.
+        #
+        # Use the most recent available trading day.
+        #
+
+        available = [
+            actual_date
+            for actual_date in lookup
+            if actual_date <= date
+        ]
+
+        if not available:
+
+            return None
+
+        return max(available)
+
+    @staticmethod
+    def _latest_close(
+        market,
+        symbol,
+        date,
+    ):
+
+        if symbol not in market:
+
+            return None
+
+        history = market[symbol]
+
+        data = history.data
+
+        available = data.loc[
+            data.index <= date
+        ]
+
+        if available.empty:
+
+            return None
+
+        return float(
+            available["Close"].iloc[-1]
+        )
+
+    def _strategy_rows(
+        self,
+        market,
+        comparison,
+    ):
+
+        backtest = comparison.backtest
+
+        simulations = (
+            self._simulation_lookup(
+                backtest
+            )
+        )
+
+        drawdowns = (
+            self._drawdown_lookup(
+                backtest.equity_curve
+            )
+        )
+
+        rows = []
 
         for date_string, event in CHECKPOINTS:
 
-            date = pd.Timestamp(date_string)
-
-            #
-            # Find exact simulation date.
-            #
-
-            simulation = simulations.get(date)
-
-            #
-            # Some checkpoints may fall on weekends or holidays.
-            #
-            # If there isn't an exact trading day, use the most
-            # recent available simulation on or before the date.
-            #
-
-            if simulation is None:
-
-                available = [
-                    d
-                    for d in simulations
-                    if d <= date
-                ]
-
-                if not available:
-                    continue
-
-                actual_date = max(available)
-
-                simulation = simulations[
-                    actual_date
-                ]
-
-            else:
-
-                actual_date = date
-
-            #
-            # Portfolio value.
-            #
-
-            equity_point = equity.get(actual_date)
-
-            if equity_point is not None:
-
-                portfolio_value = equity_point.equity
-
-            else:
-
-                portfolio_value = None
-
-            #
-            # Strategy drawdown.
-            #
-
-            strategy_drawdown = drawdown_lookup.get(
-                actual_date
+            requested_date = pd.Timestamp(
+                date_string
             )
 
-            #
-            # Signals.
-            #
+            actual_date = self._find_checkpoint(
+                simulations,
+                requested_date,
+            )
 
-            signals = simulation.signals
+            if actual_date is None:
 
-            #
-            # Strategy state.
-            #
+                continue
 
-            strategy_result = simulation.strategy
-
-            #
-            # Defensive asset.
-            #
-
-            defensive_asset = ""
-
-            if hasattr(
-                simulation,
-                "defensive",
-            ):
-
-                defensive_asset = (
-                    simulation.defensive.symbol
-                )
-
-            #
-            # Market prices.
-            #
-
-            def latest_close(symbol):
-
-                if symbol not in market:
-                    return None
-
-                history = market[symbol]
-
-                data = history.data
-
-                available = data.loc[
-                    data.index <= actual_date
-                ]
-
-                if available.empty:
-                    return None
-
-                return float(
-                    available["Close"].iloc[-1]
-                )
-
-            #
-            # Add row.
-            #
+            simulation = simulations[
+                actual_date
+            ]
 
             rows.append({
 
@@ -219,105 +199,223 @@ class CheckpointReport:
                 "Event":
                     event,
 
-                #
-                # Strategy
-                #
+                "Strategy":
+                    comparison.name,
 
-                "Strategy State":
-                    strategy_result.new_state.name,
+                "State":
+                    simulation.portfolio_state.name,
 
-                "Strategy Portfolio":
-                    portfolio_value,
+                "Asset":
+                    simulation.symbol,
 
-                "Strategy Drawdown":
-                    strategy_drawdown,
+                "Portfolio":
+                    simulation.equity,
 
-                "Defensive Asset":
-                    defensive_asset,
-
-                #
-                # Market prices
-                #
-
-                "QQQ Close":
-                    latest_close("QQQ"),
-
-                "TQQQ Synthetic Close":
-                    latest_close("TQQQ"),
-
-                "QLD Synthetic Close":
-                    latest_close("QLD"),
+                "Drawdown":
+                    drawdowns.get(
+                        actual_date
+                    ),
 
                 #
                 # Indicators
                 #
 
                 "RVol":
-                    signals.rvol,
+                    simulation.signals.rvol,
 
                 "VR":
-                    signals.vr,
+                    simulation.signals.vr,
 
                 "SPY vs 200 SMA":
-                    signals.spy_distance,
+                    simulation.signals.spy_distance,
 
                 "Credit":
-                    signals.credit,
+                    simulation.signals.credit,
 
                 #
                 # Boolean signals
                 #
 
                 "RVol > QLD":
-                    signals.rvol_over_qld,
+                    simulation.signals.rvol_over_qld,
 
                 "VR > QLD":
-                    signals.vr_over_qld,
+                    simulation.signals.vr_over_qld,
 
                 "SPY Breakdown":
-                    signals.spy_breakdown,
+                    simulation.signals.spy_breakdown,
 
                 "Credit Crisis":
-                    signals.credit_crisis,
+                    simulation.signals.credit_crisis,
 
                 "Donchian Break":
-                    signals.donchian_break,
+                    simulation.signals.donchian_break,
 
                 "Donchian Confirmed":
-                    signals.donchian_confirmed,
+                    simulation.signals.donchian_confirmed,
 
                 #
                 # Transition
                 #
 
                 "State Changed":
-                    strategy_result.changed,
+                    simulation.strategy.changed,
 
                 "Transition Reasons":
                     " | ".join(
-                        strategy_result.reasons
+                        simulation.strategy.reasons
                     ),
 
             })
 
+        return rows
+
+    def _benchmark_rows(
+        self,
+        market,
+    ):
+
+        rows = []
+
         #
-        # Create DataFrame.
+        # Buy-and-hold benchmark assets.
+        #
+        # These are informational only.
         #
 
-        dataframe = pd.DataFrame(rows)
+        benchmark_symbols = [
+            "TQQQ",
+            "QLD",
+            "QQQ",
+        ]
+
+        for date_string, event in CHECKPOINTS:
+
+            requested_date = pd.Timestamp(
+                date_string
+            )
+
+            row = {
+
+                "Date":
+                    date_string,
+
+                "Actual Trading Date":
+                    None,
+
+                "Event":
+                    event,
+
+                "Strategy":
+                    "Buy & Hold",
+
+                "State":
+                    None,
+
+                "Asset":
+                    None,
+
+                "Portfolio":
+                    None,
+
+                "Drawdown":
+                    None,
+
+                "RVol":
+                    None,
+
+                "VR":
+                    None,
+
+                "SPY vs 200 SMA":
+                    None,
+
+                "Credit":
+                    None,
+
+                "RVol > QLD":
+                    None,
+
+                "VR > QLD":
+                    None,
+
+                "SPY Breakdown":
+                    None,
+
+                "Credit Crisis":
+                    None,
+
+                "Donchian Break":
+                    None,
+
+                "Donchian Confirmed":
+                    None,
+
+                "State Changed":
+                    None,
+
+                "Transition Reasons":
+                    None,
+
+            }
+
+            #
+            # Keep the benchmark prices available as columns.
+            #
+
+            for symbol in benchmark_symbols:
+
+                row[
+                    f"{symbol} Close"
+                ] = self._latest_close(
+                    market,
+                    symbol,
+                    requested_date,
+                )
+
+            rows.append(row)
+
+        return rows
+
+    def generate(
+        self,
+        market,
+        strategy_comparisons,
+    ):
+
+        rows = []
 
         #
-        # Ensure output directory exists.
+        # Strategy comparison rows.
         #
+
+        for comparison in strategy_comparisons:
+
+            rows.extend(
+                self._strategy_rows(
+                    market,
+                    comparison,
+                )
+            )
+
+        #
+        # Benchmark rows.
+        #
+
+        rows.extend(
+            self._benchmark_rows(
+                market,
+            )
+        )
+
+        dataframe = pd.DataFrame(
+            rows
+        )
 
         self.output_path.parent.mkdir(
             parents=True,
             exist_ok=True,
         )
-
-        #
-        # Write CSV.
-        #
 
         dataframe.to_csv(
             self.output_path,

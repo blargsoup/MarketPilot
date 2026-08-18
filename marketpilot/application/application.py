@@ -425,8 +425,21 @@ class Application:
 
             market,
 
-            backtest_result,
+            strategy_comparisons,
 
+        )
+
+        logger.info("")
+        logger.info("Historical Checkpoints")
+        logger.info("------------------------------")
+
+        logger.info(
+            "CSV exported to:"
+        )
+
+        logger.info(
+            "    %s",
+            checkpoint_path,
         )
 
         logger.info("")
