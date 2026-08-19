@@ -503,44 +503,105 @@ class Application:
         # Transition timing analytics
         # ------------------------------------------------------------
 
-        state_series = pd.Series(
-            {
-                simulation.context.current_date:
-                    simulation.strategy.new_state.name
-                for simulation
-                in backtest_result.simulations
-            }
-        )
-
-        equity_series = pd.Series(
-            {
-                point.date:
-                    point.equity
-                for point
-                in backtest_result.equity_curve
-            }
-        )
-
         timing_analyzer = TransitionTimingAnalyzer(
             short_transition_days=5,
             lookahead_days=20,
         )
 
-        transition_timing = timing_analyzer.analyze(
-            equity=equity_series,
-            states=state_series,
-        )
+        for comparison in strategy_comparisons:
 
-        transition_timing_path = (
-            TransitionTimingReport().generate(
-                transition_timing,
+            #
+            # Only analyze strategies that have simulations.
+            #
+
+            comparison_backtest = comparison.backtest
+
+            if not comparison_backtest.simulations:
+                continue
+
+            #
+            # Build the state history.
+            #
+
+            states = pd.Series(
+                {
+                    simulation.context.current_date:
+                        simulation.strategy.new_state.name
+                    for simulation
+                    in comparison_backtest.simulations
+                }
             )
-        )
 
-        logger.info(
-            "Transition timing report: %s",
-            transition_timing_path,
-        )
+            #
+            # Determine the strategy's asset mapping.
+            #
+            # StrategyProfile already provides the canonical mapping.
+            #
+
+            profile = comparison.strategy.profile
+
+            state_assets = {
+                "AGGRESSIVE": (
+                    profile.aggressive_asset
+                ),
+                "MODERATE": (
+                    profile.moderate_asset
+                ),
+                "DEFENSIVE": (
+                    profile.cash_asset
+                ),
+            }
+
+            #
+            # If this is the normal three-state NASDAQ strategy,
+            # preserve its actual defensive selector asset where
+            # available.
+            #
+            # The 2-State Cash strategy intentionally remains CASH.
+            #
+
+            if (
+                profile.name
+                == "NASDAQ"
+                and hasattr(
+                    profile,
+                    "defensive_asset",
+                )
+            ):
+
+                state_assets["DEFENSIVE"] = (
+                    profile.defensive_asset
+                )
+
+            transitions = timing_analyzer.analyze(
+                market=market,
+                states=states,
+                state_assets=state_assets,
+            )
+
+            safe_name = (
+                comparison.name
+                .lower()
+                .replace(" ", "_")
+                .replace("/", "_")
+                .replace("(", "")
+                .replace(")", "")
+            )
+
+            output_path = (
+                f"output/transition_timing_{safe_name}.csv"
+            )
+
+            TransitionTimingReport(
+                output_path=output_path,
+            ).generate(
+                transitions
+            )
+
+            logger.info(
+                "Transition timing report: %s",
+                output_path,
+            )
 
         logger.info("")
         logger.info("Historical Checkpoints")

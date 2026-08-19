@@ -1,17 +1,20 @@
 """
-Transition timing analytics.
+Asset-aware transition timing analytics.
 
-Evaluates whether strategy state transitions were:
+Measures the quality of state transitions using the actual asset
+being entered or exited rather than portfolio equity.
 
-    - early
-    - well timed
-    - late
-    - short-lived / possible whipsaw
+Important:
+    Forward-looking measurements are bounded by the next state
+    transition. A transition can never be judged using market action
+    that occurred after the strategy had already changed state.
 
-The analysis is intentionally transition-aware. Forward-looking
-measurements stop at the next strategy state transition, so a
-transition is never judged using market movement that occurred after
-the strategy had already changed state again.
+This module is intended to support:
+    - transition timing diagnostics
+    - whipsaw detection
+    - early/late entry analysis
+    - early/late exit analysis
+    - eventual strategy optimization
 """
 
 from dataclasses import dataclass
@@ -23,41 +26,68 @@ import pandas as pd
 @dataclass
 class TransitionTiming:
     date: pd.Timestamp
+    exit_date: Optional[pd.Timestamp]
+
     from_state: str
     to_state: str
 
-    duration_days: int
+    exited_asset: str
+    entered_asset: str
 
-    # Forward performance while the transition remained active.
+    duration_days: int
+    whipsaw: bool
+
+    entry_price: Optional[float]
+    exit_price: Optional[float]
+
+    previous_10d_high: Optional[float]
+    following_10d_low: Optional[float]
+
+    entry_vs_10d_low: Optional[float]
+    exit_vs_previous_10d_high: Optional[float]
+
     return_1d: Optional[float]
     return_3d: Optional[float]
     return_5d: Optional[float]
     return_10d: Optional[float]
     return_20d: Optional[float]
 
-    # Timing measurements.
-    entry_vs_10d_low: Optional[float]
-    exit_vs_previous_10d_high: Optional[float]
+    mae: Optional[float]
+    mfe: Optional[float]
 
-    # Classification.
+    downside_avoided: Optional[float]
+    upside_captured: Optional[float]
+
     timing_score: Optional[float]
-    timing_class: str
+    outcome_score: Optional[float]
+    transition_quality: Optional[float]
 
-    whipsaw: bool
+    timing_class: str
 
 
 class TransitionTimingAnalyzer:
     """
-    Analyze the timing quality of strategy transitions.
+    Analyze transition quality using actual held assets.
 
     Parameters
     ----------
     short_transition_days:
-        A transition lasting this many trading days or fewer is
-        considered potentially short-lived / whipsaw.
+        Transitions lasting this many trading days or fewer are
+        classified as potential whipsaws.
 
     lookahead_days:
-        Maximum number of trading days used for timing analysis.
+        Maximum forward window for entry/outcome measurements.
+
+    entry_asset_lookup:
+        Optional mapping from state name to asset symbol.
+
+    Example:
+
+        {
+            "AGGRESSIVE": "TQQQ",
+            "MODERATE": "QLD",
+            "DEFENSIVE": "CASH",
+        }
     """
 
     def __init__(
@@ -65,88 +95,105 @@ class TransitionTimingAnalyzer:
         short_transition_days: int = 5,
         lookahead_days: int = 20,
     ):
-        self.short_transition_days = short_transition_days
-        self.lookahead_days = lookahead_days
+        self.short_transition_days = (
+            short_transition_days
+        )
 
-    # ------------------------------------------------------------------
-    # Public API
-    # ------------------------------------------------------------------
+        self.lookahead_days = (
+            lookahead_days
+        )
+
+    # ================================================================
+    # PUBLIC API
+    # ================================================================
 
     def analyze(
         self,
-        equity: pd.Series,
+        market,
         states: pd.Series,
+        state_assets: dict[str, str],
     ) -> list[TransitionTiming]:
         """
         Analyze every state transition.
 
-        `equity` must contain the portfolio equity indexed by date.
+        Parameters
+        ----------
+        market:
+            Market history dictionary.
 
-        `states` must contain the strategy state indexed by date.
+        states:
+            Series indexed by trading date containing state names.
 
-        Both series are aligned to their common dates.
+        state_assets:
+            Mapping of state name -> actual asset symbol.
+
+        Returns
+        -------
+        list[TransitionTiming]
         """
 
-        data = self._prepare(
-            equity,
-            states,
+        state_frame = self._prepare_states(
+            states
         )
 
-        transitions = self._find_transitions(data)
+        transitions = (
+            self._find_transitions(
+                state_frame
+            )
+        )
 
         results = []
 
         for transition in transitions:
 
             result = self._analyze_transition(
-                data,
+                market,
+                state_frame,
                 transition,
+                state_assets,
             )
 
             results.append(result)
 
         return results
 
-    # ------------------------------------------------------------------
-    # Preparation
-    # ------------------------------------------------------------------
+    # ================================================================
+    # STATE PREPARATION
+    # ================================================================
 
-    def _prepare(
+    def _prepare_states(
         self,
-        equity: pd.Series,
         states: pd.Series,
-    ) -> pd.DataFrame:
+    ) -> pd.Series:
 
-        frame = pd.DataFrame(
-            {
-                "equity": equity,
-                "state": states,
-            }
+        result = states.copy()
+
+        result.index = pd.to_datetime(
+            result.index
         )
 
-        frame = frame.dropna()
+        result = result.sort_index()
 
-        frame = frame.sort_index()
+        result = result.dropna()
 
-        return frame
+        return result
 
-    # ------------------------------------------------------------------
-    # Transition detection
-    # ------------------------------------------------------------------
+    # ================================================================
+    # TRANSITION DETECTION
+    # ================================================================
 
     def _find_transitions(
         self,
-        data: pd.DataFrame,
+        states: pd.Series,
     ) -> list[dict]:
 
         transitions = []
 
         previous_state = None
-        previous_date = None
 
-        for date, row in data.iterrows():
-
-            state = row["state"]
+        for position, (date, state) in enumerate(
+            states.items()
+        ):
 
             if previous_state is not None:
 
@@ -154,27 +201,30 @@ class TransitionTimingAnalyzer:
 
                     transitions.append(
                         {
+                            "position": position,
                             "date": date,
                             "from_state": previous_state,
                             "to_state": state,
-                            "previous_date": previous_date,
                         }
                     )
 
             previous_state = state
-            previous_date = date
 
         return transitions
 
-    # ------------------------------------------------------------------
-    # Individual transition
-    # ------------------------------------------------------------------
+    # ================================================================
+    # TRANSITION ANALYSIS
+    # ================================================================
 
     def _analyze_transition(
         self,
-        data: pd.DataFrame,
+        market,
+        states: pd.Series,
         transition: dict,
+        state_assets: dict[str, str],
     ) -> TransitionTiming:
+
+        position = transition["position"]
 
         date = transition["date"]
 
@@ -182,110 +232,53 @@ class TransitionTimingAnalyzer:
 
         to_state = transition["to_state"]
 
-        entry_position = data.index.get_loc(date)
-
         #
-        # Find the next transition.
-        #
-        # This is critical.
-        #
-        # Forward measurements are NOT allowed to cross this boundary.
+        # Asset held before the transition.
         #
 
-        next_transition = self._next_transition_index(
-            data,
-            entry_position,
+        exited_asset = state_assets.get(
+            from_state,
+            "UNKNOWN",
+        )
+
+        #
+        # Asset entered by the transition.
+        #
+
+        entered_asset = state_assets.get(
+            to_state,
+            "UNKNOWN",
+        )
+
+        #
+        # Find next transition.
+        #
+
+        next_transition = self._next_transition(
+            states,
+            position,
         )
 
         if next_transition is None:
 
-            end_position = len(data) - 1
+            end_position = len(states) - 1
+
+            exit_date = None
 
         else:
 
-            end_position = next_transition - 1
+            end_position = (
+                next_transition["position"] - 1
+            )
+
+            exit_date = (
+                next_transition["date"]
+            )
 
         duration_days = (
             end_position
-            - entry_position
+            - position
             + 1
-        )
-
-        active = data.iloc[
-            entry_position:end_position + 1
-        ]
-
-        equity_start = active["equity"].iloc[0]
-
-        returns = {}
-
-        for days in (
-            1,
-            3,
-            5,
-            10,
-            20,
-        ):
-
-            if days < len(active):
-
-                equity_end = active["equity"].iloc[days]
-
-                returns[days] = (
-                    equity_end
-                    / equity_start
-                    - 1
-                )
-
-            else:
-
-                returns[days] = None
-
-        #
-        # Re-entry timing.
-        #
-        # When entering a risk asset, we want to know how close the
-        # entry was to the lowest point available during the following
-        # 10 trading days, but only while the transition remains active.
-        #
-
-        entry_vs_10d_low = self._entry_vs_forward_low(
-            data,
-            entry_position,
-            end_position,
-        )
-
-        #
-        # Exit timing.
-        #
-        # When exiting risk, compare the exit point to the highest price
-        # achieved during the preceding 10 trading days.
-        #
-        # For portfolio-level analysis we use equity rather than the
-        # underlying ETF price.
-        #
-
-        exit_vs_previous_10d_high = (
-            self._exit_vs_previous_high(
-                data,
-                entry_position,
-            )
-        )
-
-        #
-        # Timing score.
-        #
-
-        timing_score = self._timing_score(
-            to_state=to_state,
-            entry_vs_10d_low=entry_vs_10d_low,
-            exit_vs_previous_10d_high=(
-                exit_vs_previous_10d_high
-            ),
-        )
-
-        timing_class = self._timing_class(
-            timing_score,
         )
 
         whipsaw = (
@@ -293,172 +286,692 @@ class TransitionTimingAnalyzer:
             <= self.short_transition_days
         )
 
-        return TransitionTiming(
-            date=date,
+        #
+        # Entry asset price history.
+        #
+
+        entry_history = self._history(
+            market,
+            entered_asset,
+        )
+
+        #
+        # Exit asset price history.
+        #
+
+        exit_history = self._history(
+            market,
+            exited_asset,
+        )
+
+        #
+        # Entry price.
+        #
+
+        entry_price = self._price_on_date(
+            entry_history,
+            date,
+        )
+
+        #
+        # Exit price.
+        #
+        # The exit happens on the next transition date.
+        #
+
+        exit_price = None
+
+        if exit_date is not None:
+
+            exit_price = self._price_on_date(
+                exit_history,
+                exit_date,
+            )
+
+        #
+        # Entry timing.
+        #
+
+        following_10d_low = (
+            self._following_low(
+                entry_history,
+                date,
+                states,
+                position,
+                end_position,
+            )
+        )
+
+        entry_vs_10d_low = (
+            self._distance_from_low(
+                entry_price,
+                following_10d_low,
+            )
+        )
+
+        #
+        # Exit timing.
+        #
+
+        previous_10d_high = (
+            self._previous_high(
+                exit_history,
+                exit_date,
+            )
+            if exit_date is not None
+            else None
+        )
+
+        exit_vs_previous_10d_high = (
+            self._distance_from_high(
+                exit_price,
+                previous_10d_high,
+            )
+        )
+
+        #
+        # Returns while the transition remained active.
+        #
+        # These use portfolio-equity-equivalent asset returns
+        # for the asset that was entered.
+        #
+
+        returns = self._forward_returns(
+            entry_history,
+            date,
+            states,
+            position,
+            end_position,
+        )
+
+        #
+        # Maximum adverse/favorable excursion after entry.
+        #
+
+        mae, mfe = self._excursions(
+            entry_history,
+            date,
+            states,
+            position,
+            end_position,
+        )
+
+        #
+        # Outcome measurements.
+        #
+
+        downside_avoided = (
+            self._downside_avoided(
+                exit_history,
+                exit_date,
+            )
+            if exit_date is not None
+            else None
+        )
+
+        upside_captured = (
+            self._upside_captured(
+                entry_history,
+                date,
+                states,
+                position,
+                end_position,
+            )
+        )
+
+        #
+        # Scores.
+        #
+
+        timing_score = self._timing_score(
             from_state=from_state,
             to_state=to_state,
+            entry_vs_10d_low=(
+                entry_vs_10d_low
+            ),
+            exit_vs_previous_10d_high=(
+                exit_vs_previous_10d_high
+            ),
+        )
+
+        outcome_score = self._outcome_score(
+            to_state=to_state,
+            returns=returns,
+            downside_avoided=(
+                downside_avoided
+            ),
+            upside_captured=(
+                upside_captured
+            ),
+        )
+
+        transition_quality = (
+            self._transition_quality(
+                timing_score,
+                outcome_score,
+            )
+        )
+
+        timing_class = self._timing_class(
+            timing_score
+        )
+
+        return TransitionTiming(
+            date=date,
+            exit_date=exit_date,
+
+            from_state=from_state,
+            to_state=to_state,
+
+            exited_asset=exited_asset,
+            entered_asset=entered_asset,
+
             duration_days=duration_days,
+            whipsaw=whipsaw,
+
+            entry_price=entry_price,
+            exit_price=exit_price,
+
+            previous_10d_high=(
+                previous_10d_high
+            ),
+
+            following_10d_low=(
+                following_10d_low
+            ),
+
+            entry_vs_10d_low=(
+                entry_vs_10d_low
+            ),
+
+            exit_vs_previous_10d_high=(
+                exit_vs_previous_10d_high
+            ),
+
             return_1d=returns[1],
             return_3d=returns[3],
             return_5d=returns[5],
             return_10d=returns[10],
             return_20d=returns[20],
-            entry_vs_10d_low=entry_vs_10d_low,
-            exit_vs_previous_10d_high=(
-                exit_vs_previous_10d_high
+
+            mae=mae,
+            mfe=mfe,
+
+            downside_avoided=(
+                downside_avoided
             ),
+
+            upside_captured=(
+                upside_captured
+            ),
+
             timing_score=timing_score,
+            outcome_score=outcome_score,
+            transition_quality=(
+                transition_quality
+            ),
+
             timing_class=timing_class,
-            whipsaw=whipsaw,
         )
 
-    # ------------------------------------------------------------------
-    # Transition boundaries
-    # ------------------------------------------------------------------
+    # ================================================================
+    # MARKET HISTORY
+    # ================================================================
 
-    def _next_transition_index(
+    def _history(
         self,
-        data: pd.DataFrame,
-        current_position: int,
-    ) -> Optional[int]:
+        market,
+        symbol: str,
+    ):
 
-        current_state = data["state"].iloc[
+        if symbol in (
+            None,
+            "UNKNOWN",
+            "CASH",
+        ):
+            return None
+
+        if symbol not in market:
+            return None
+
+        history = market[symbol]
+
+        return history.data
+
+    # ================================================================
+    # PRICE ACCESS
+    # ================================================================
+
+    def _price_on_date(
+        self,
+        history,
+        date,
+    ) -> Optional[float]:
+
+        if history is None:
+            return None
+
+        if date not in history.index:
+            return None
+
+        row = history.loc[date]
+
+        if "Close" in row:
+            return float(row["Close"])
+
+        if "close" in row:
+            return float(row["close"])
+
+        return None
+
+    # ================================================================
+    # TRANSITION BOUNDARY
+    # ================================================================
+
+    def _next_transition(
+        self,
+        states: pd.Series,
+        current_position: int,
+    ) -> Optional[dict]:
+
+        current_state = states.iloc[
             current_position
         ]
 
         for position in range(
             current_position + 1,
-            len(data),
+            len(states),
         ):
 
-            if data["state"].iloc[position] != current_state:
+            if states.iloc[position] != current_state:
 
-                return position
+                return {
+                    "position": position,
+                    "date": states.index[position],
+                }
 
         return None
 
-    # ------------------------------------------------------------------
-    # Entry timing
-    # ------------------------------------------------------------------
+    # ================================================================
+    # FORWARD LOW
+    # ================================================================
 
-    def _entry_vs_forward_low(
+    def _following_low(
         self,
-        data: pd.DataFrame,
-        entry_position: int,
-        end_position: int,
+        history,
+        entry_date,
+        states,
+        entry_position,
+        end_position,
     ) -> Optional[float]:
 
-        entry_equity = data["equity"].iloc[
-            entry_position
-        ]
+        if history is None:
+            return None
 
-        forward_end = min(
-            entry_position + self.lookahead_days,
+        if entry_date not in history.index:
+            return None
+
+        #
+        # Only look forward while this transition remains active.
+        #
+
+        end = min(
+            entry_position
+            + self.lookahead_days,
             end_position,
         )
 
-        window = data["equity"].iloc[
-            entry_position:forward_end + 1
+        dates = states.index[
+            entry_position:end + 1
         ]
 
-        if len(window) < 2:
+        prices = history.reindex(
+            dates
+        )["Close"].dropna()
+
+        if prices.empty:
             return None
 
-        low = window.min()
-
-        #
-        # Positive means the entry was above the subsequent low.
-        #
-        # Example:
-        #
-        # Entry = $100
-        # 10d low = $90
-        #
-        # Result = 11.11%
-        #
-        # This tells us there was an additional 10% decline available
-        # after our entry.
-        #
-
-        if low == 0:
-            return None
-
-        return (
-            entry_equity / low
-            - 1
+        return float(
+            prices.min()
         )
 
-    # ------------------------------------------------------------------
-    # Exit timing
-    # ------------------------------------------------------------------
+    # ================================================================
+    # PREVIOUS HIGH
+    # ================================================================
 
-    def _exit_vs_previous_high(
+    def _previous_high(
         self,
-        data: pd.DataFrame,
-        exit_position: int,
+        history,
+        exit_date,
     ) -> Optional[float]:
 
-        if exit_position == 0:
+        if history is None:
             return None
+
+        if exit_date not in history.index:
+            return None
+
+        position = history.index.get_loc(
+            exit_date
+        )
 
         start = max(
             0,
-            exit_position - 10,
+            position - 10,
         )
 
-        window = data["equity"].iloc[
-            start:exit_position + 1
-        ]
+        window = history.iloc[
+            start:position + 1
+        ]["Close"]
 
-        high = window.max()
-
-        exit_equity = data["equity"].iloc[
-            exit_position
-        ]
-
-        if high == 0:
+        if window.empty:
             return None
 
-        #
-        # Positive means we exited below the recent high.
-        #
-        # Example:
-        #
-        # Previous 10d high = $120
-        # Exit = $100
-        #
-        # Result = -16.67%
-        #
-        # The negative sign is intentional: it represents the amount
-        # of value remaining above the exit.
-        #
-
-        return (
-            exit_equity / high
-            - 1
+        return float(
+            window.max()
         )
 
-    # ------------------------------------------------------------------
-    # Timing score
-    # ------------------------------------------------------------------
+    # ================================================================
+    # DISTANCE METRICS
+    # ================================================================
+
+    def _distance_from_low(
+        self,
+        entry_price,
+        low,
+    ) -> Optional[float]:
+
+        if (
+            entry_price is None
+            or low is None
+            or low == 0
+        ):
+            return None
+
+        return (
+            entry_price / low
+            - 1.0
+        )
+
+    def _distance_from_high(
+        self,
+        exit_price,
+        high,
+    ) -> Optional[float]:
+
+        if (
+            exit_price is None
+            or high is None
+            or high == 0
+        ):
+            return None
+
+        return (
+            exit_price / high
+            - 1.0
+        )
+
+    # ================================================================
+    # FORWARD RETURNS
+    # ================================================================
+
+    def _forward_returns(
+        self,
+        history,
+        entry_date,
+        states,
+        entry_position,
+        end_position,
+    ) -> dict:
+
+        results = {
+            1: None,
+            3: None,
+            5: None,
+            10: None,
+            20: None,
+        }
+
+        if history is None:
+            return results
+
+        if entry_date not in history.index:
+            return results
+
+        entry_price = self._price_on_date(
+            history,
+            entry_date,
+        )
+
+        if entry_price is None:
+            return results
+
+        for days in results:
+
+            target_position = (
+                entry_position + days
+            )
+
+            #
+            # Never cross the next transition.
+            #
+
+            if target_position > end_position:
+                continue
+
+            target_date = states.index[
+                target_position
+            ]
+
+            target_price = (
+                self._price_on_date(
+                    history,
+                    target_date,
+                )
+            )
+
+            if target_price is None:
+                continue
+
+            results[days] = (
+                target_price
+                / entry_price
+                - 1.0
+            )
+
+        return results
+
+    # ================================================================
+    # MAE / MFE
+    # ================================================================
+
+    def _excursions(
+        self,
+        history,
+        entry_date,
+        states,
+        entry_position,
+        end_position,
+    ) -> tuple[
+        Optional[float],
+        Optional[float],
+    ]:
+
+        if history is None:
+            return None, None
+
+        if entry_date not in history.index:
+            return None, None
+
+        entry_price = self._price_on_date(
+            history,
+            entry_date,
+        )
+
+        if entry_price is None:
+            return None, None
+
+        end = min(
+            entry_position
+            + self.lookahead_days,
+            end_position,
+        )
+
+        dates = states.index[
+            entry_position:end + 1
+        ]
+
+        prices = history.reindex(
+            dates
+        )["Close"].dropna()
+
+        if prices.empty:
+            return None, None
+
+        returns = (
+            prices
+            / entry_price
+            - 1.0
+        )
+
+        mae = float(
+            returns.min()
+        )
+
+        mfe = float(
+            returns.max()
+        )
+
+        return mae, mfe
+
+    # ================================================================
+    # EXIT OUTCOME
+    # ================================================================
+
+    def _downside_avoided(
+        self,
+        history,
+        exit_date,
+    ) -> Optional[float]:
+
+        if history is None:
+            return None
+
+        if exit_date is None:
+            return None
+
+        if exit_date not in history.index:
+            return None
+
+        exit_position = history.index.get_loc(
+            exit_date
+        )
+
+        end = min(
+            exit_position
+            + self.lookahead_days,
+            len(history) - 1,
+        )
+
+        exit_price = self._price_on_date(
+            history,
+            exit_date,
+        )
+
+        if exit_price is None:
+            return None
+
+        prices = history.iloc[
+            exit_position:end + 1
+        ]["Close"]
+
+        if prices.empty:
+            return None
+
+        lowest = float(
+            prices.min()
+        )
+
+        return (
+            lowest
+            / exit_price
+            - 1.0
+        )
+
+    # ================================================================
+    # UPSIDE CAPTURE
+    # ================================================================
+
+    def _upside_captured(
+        self,
+        history,
+        entry_date,
+        states,
+        entry_position,
+        end_position,
+    ) -> Optional[float]:
+
+        if history is None:
+            return None
+
+        if entry_date not in history.index:
+            return None
+
+        entry_price = self._price_on_date(
+            history,
+            entry_date,
+        )
+
+        if entry_price is None:
+            return None
+
+        end = min(
+            entry_position
+            + self.lookahead_days,
+            end_position,
+        )
+
+        dates = states.index[
+            entry_position:end + 1
+        ]
+
+        prices = history.reindex(
+            dates
+        )["Close"].dropna()
+
+        if prices.empty:
+            return None
+
+        highest = float(
+            prices.max()
+        )
+
+        return (
+            highest
+            / entry_price
+            - 1.0
+        )
+
+    # ================================================================
+    # TIMING SCORE
+    # ================================================================
 
     def _timing_score(
         self,
-        to_state: str,
-        entry_vs_10d_low: Optional[float],
-        exit_vs_previous_10d_high: Optional[float],
+        from_state,
+        to_state,
+        entry_vs_10d_low,
+        exit_vs_previous_10d_high,
     ) -> Optional[float]:
 
         #
-        # Re-entry:
+        # Re-entry.
         #
-        # We want a low entry.
-        #
-        # 0% = entered exactly at the 10d low
-        # 5% = entered 5% above the low
-        # 20% = entered 20% above the low
-        #
-        # Lower is better.
+        # 0% above low = 100
+        # 10% above low = 80
+        # 25% above low = 50
+        # 50%+ above low = 0
         #
 
         if (
@@ -469,7 +982,7 @@ class TransitionTimingAnalyzer:
             if entry_vs_10d_low is None:
                 return None
 
-            penalty = max(
+            distance = max(
                 0.0,
                 entry_vs_10d_low,
             )
@@ -480,7 +993,7 @@ class TransitionTimingAnalyzer:
                 * (
                     1.0
                     - min(
-                        penalty,
+                        distance,
                         0.50,
                     )
                     / 0.50
@@ -488,14 +1001,12 @@ class TransitionTimingAnalyzer:
             )
 
         #
-        # Exit:
+        # Exit.
         #
-        # We want to exit close to the previous high.
-        #
-        # 0% below high = perfect
-        # -5% = very good
-        # -20% = increasingly late
-        #
+        # 0% below high = 100
+        # 10% below high = 80
+        # 25% below high = 50
+        # 50%+ below high = 0
         #
 
         if "DEFENSIVE" in to_state:
@@ -525,28 +1036,141 @@ class TransitionTimingAnalyzer:
 
         return None
 
-    # ------------------------------------------------------------------
-    # Classification
-    # ------------------------------------------------------------------
+    # ================================================================
+    # OUTCOME SCORE
+    # ================================================================
+
+    def _outcome_score(
+        self,
+        to_state,
+        returns,
+        downside_avoided,
+        upside_captured,
+    ) -> Optional[float]:
+
+        #
+        # Re-entry:
+        #
+        # Reward actual upside during the active transition.
+        #
+
+        if (
+            "AGGRESSIVE" in to_state
+            or "MODERATE" in to_state
+        ):
+
+            candidates = [
+                returns[5],
+                returns[10],
+                returns[20],
+            ]
+
+            candidates = [
+                value
+                for value in candidates
+                if value is not None
+            ]
+
+            if not candidates:
+                return None
+
+            best = max(
+                candidates
+            )
+
+            #
+            # +25% or better = 100
+            # 0% = 50
+            # -25% or worse = 0
+            #
+
+            return max(
+                0.0,
+                min(
+                    100.0,
+                    50.0
+                    + best * 200.0,
+                ),
+            )
+
+        #
+        # Exit:
+        #
+        # Reward downside avoided.
+        #
+
+        if "DEFENSIVE" in to_state:
+
+            if downside_avoided is None:
+                return None
+
+            #
+            # -25% or worse avoided = 100
+            # 0% = 50
+            # +25% = 0
+            #
+
+            return max(
+                0.0,
+                min(
+                    100.0,
+                    50.0
+                    - downside_avoided * 200.0,
+                ),
+            )
+
+        return None
+
+    # ================================================================
+    # COMBINED QUALITY
+    # ================================================================
+
+    def _transition_quality(
+        self,
+        timing_score,
+        outcome_score,
+    ) -> Optional[float]:
+
+        if (
+            timing_score is None
+            or outcome_score is None
+        ):
+            return None
+
+        #
+        # Timing matters slightly more than outcome.
+        #
+        # Outcome remains important because a technically late
+        # transition can still have been highly effective.
+        #
+
+        return (
+            timing_score * 0.60
+            + outcome_score * 0.40
+        )
+
+    # ================================================================
+    # CLASSIFICATION
+    # ================================================================
 
     def _timing_class(
         self,
-        score: Optional[float],
+        score,
     ) -> str:
 
         if score is None:
             return "N/A"
 
-        if score >= 80:
+        if score >= 85:
             return "EXCELLENT"
 
-        if score >= 60:
+        if score >= 70:
             return "GOOD"
 
-        if score >= 40:
+        if score >= 50:
             return "FAIR"
 
-        if score >= 20:
+        if score >= 30:
             return "POOR"
 
         return "VERY_POOR"
