@@ -489,16 +489,6 @@ class Application:
 
         )
 
-        #
-        # Historical checkpoint report
-        #
-
-        checkpoint_report = CheckpointReport()
-
-        checkpoint_paths = checkpoint_report.generate(
-            strategy_comparisons,
-        )
-
         # ------------------------------------------------------------
         # Transition timing analytics
         # ------------------------------------------------------------
