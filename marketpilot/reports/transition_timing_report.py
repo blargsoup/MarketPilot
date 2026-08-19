@@ -20,7 +20,11 @@ class TransitionTimingReport:
     def generate(
         self,
         transitions,
+        filename=None,
     ):
+
+        if filename:
+            self.output_path = self.output_path.parent / filename
 
         rows = []
 

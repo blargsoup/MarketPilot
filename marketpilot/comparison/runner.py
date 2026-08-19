@@ -12,9 +12,9 @@ class StrategyComparison:
     """A completed strategy backtest and its performance summary."""
 
     name: str
-    strategy: object
     backtest: object
     statistics: object
+    profile: object
 
 
 class StrategyComparisonRunner:
@@ -49,9 +49,9 @@ class StrategyComparisonRunner:
             comparisons.append(
                 StrategyComparison(
                     name=strategy.name,
-                    strategy=strategy,
                     backtest=backtest,
                     statistics=statistics,
+                    profile=strategy.profile,
                 )
             )
 
