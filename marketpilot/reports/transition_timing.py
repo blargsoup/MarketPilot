@@ -64,6 +64,34 @@ class TransitionTiming:
 
     timing_class: str
 
+@dataclass
+class TransitionTimingSummary:
+    category: str
+
+    transitions: int
+
+    average_timing_score: float | None
+    median_timing_score: float | None
+
+    average_price_gap: float | None
+    median_price_gap: float | None
+
+    average_outcome_score: float | None
+
+    average_10d_return: float | None
+
+    average_downside_avoided: float | None
+
+    average_duration: float
+
+    whipsaw_rate: float
+
+    excellent: int
+    good: int
+    fair: int
+    poor: int
+    very_poor: int
+
 
 class TransitionTimingAnalyzer:
     """
@@ -951,6 +979,124 @@ class TransitionTimingAnalyzer:
             highest
             / entry_price
             - 1.0
+        )
+
+    def summarize(
+        self,
+        transitions: list[TransitionTiming],
+    ) -> list[TransitionTimingSummary]:
+
+        summaries = []
+
+        summaries.append(
+            self._summarize_group(
+                "Entries",
+                [
+                    t for t in transitions
+                    if t.to_state in ("AGGRESSIVE", "MODERATE")
+                ],
+                use_entry_metric=True,
+            )
+        )
+
+        summaries.append(
+            self._summarize_group(
+                "Exits",
+                [
+                    t for t in transitions
+                    if t.to_state == "DEFENSIVE"
+                ],
+                use_entry_metric=False,
+            )
+        )
+
+        return summaries
+
+
+    def _summarize_group(
+        self,
+        name,
+        events,
+        use_entry_metric,
+    ):
+
+        import pandas as pd
+
+        if not events:
+
+            return TransitionTimingSummary(
+                category=name,
+                transitions=0,
+                average_timing_score=None,
+                median_timing_score=None,
+                average_price_gap=None,
+                median_price_gap=None,
+                average_outcome_score=None,
+                average_10d_return=None,
+                average_downside_avoided=None,
+                average_duration=0,
+                whipsaw_rate=0,
+                excellent=0,
+                good=0,
+                fair=0,
+                poor=0,
+                very_poor=0,
+            )
+
+        frame = pd.DataFrame(
+            [
+                {
+                    "timing": e.timing_score,
+                    "outcome": e.outcome_score,
+                    "return10": e.return_10d,
+                    "duration": e.duration_days,
+                    "whipsaw": e.whipsaw,
+                    "class": e.timing_class,
+                    "gap": (
+                        e.entry_vs_10d_low
+                        if use_entry_metric
+                        else e.exit_vs_previous_10d_high
+                    ),
+                    "downside": e.downside_avoided,
+                }
+                for e in events
+            ]
+        )
+
+        def mean(column):
+            value = frame[column].dropna()
+            return None if value.empty else float(value.mean())
+
+        def median(column):
+            value = frame[column].dropna()
+            return None if value.empty else float(value.median())
+
+        return TransitionTimingSummary(
+            category=name,
+
+            transitions=len(frame),
+
+            average_timing_score=mean("timing"),
+            median_timing_score=median("timing"),
+
+            average_price_gap=mean("gap"),
+            median_price_gap=median("gap"),
+
+            average_outcome_score=mean("outcome"),
+
+            average_10d_return=mean("return10"),
+
+            average_downside_avoided=mean("downside"),
+
+            average_duration=float(frame["duration"].mean()),
+
+            whipsaw_rate=float(frame["whipsaw"].mean()),
+
+            excellent=int((frame["class"]=="EXCELLENT").sum()),
+            good=int((frame["class"]=="GOOD").sum()),
+            fair=int((frame["class"]=="FAIR").sum()),
+            poor=int((frame["class"]=="POOR").sum()),
+            very_poor=int((frame["class"]=="VERY_POOR").sum()),
         )
 
     # ================================================================

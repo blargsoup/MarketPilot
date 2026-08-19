@@ -593,6 +593,19 @@ class Application:
                 output_path,
             )
 
+
+        summary = timing_analyzer.summarize(
+            transitions,
+        )
+
+        TransitionTimingReport().generate_summary(
+            summary,
+            output_path=(
+                f"output/transition_timing_summary_{safe_name}.csv"
+            ),
+        )
+        
+
         logger.info("")
         logger.info("Historical Checkpoints")
         logger.info("------------------------------")

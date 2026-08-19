@@ -148,3 +148,49 @@ class TransitionTimingReport:
         )
 
         return self.output_path
+
+    def generate_summary(
+        self,
+        summaries,
+        output_path="output/transition_timing_summary.csv",
+    ):
+
+        frame = pd.DataFrame(
+            [
+                {
+                    "Category": s.category,
+
+                    "Transitions": s.transitions,
+
+                    "Avg Timing Score": s.average_timing_score,
+                    "Median Timing Score": s.median_timing_score,
+
+                    "Avg Price Gap": s.average_price_gap,
+                    "Median Price Gap": s.median_price_gap,
+
+                    "Avg Outcome Score": s.average_outcome_score,
+
+                    "Avg 10D Return": s.average_10d_return,
+
+                    "Avg Downside Avoided": s.average_downside_avoided,
+
+                    "Avg Duration": s.average_duration,
+
+                    "Whipsaw Rate": s.whipsaw_rate,
+
+                    "Excellent": s.excellent,
+                    "Good": s.good,
+                    "Fair": s.fair,
+                    "Poor": s.poor,
+                    "Very Poor": s.very_poor,
+                }
+                for s in summaries
+            ]
+        )
+
+        frame.to_csv(
+            output_path,
+            index=False,
+        )
+
+        return output_path
