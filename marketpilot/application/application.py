@@ -367,6 +367,17 @@ class Application:
             strategy_comparisons,
         )
 
+        signal_events_path = signal_paths["signal_events"]
+
+        signal_events = pd.read_csv(
+            signal_events_path,
+        )
+
+        logger.info(
+            "Loaded signal event history: %s",
+            signal_events_path,
+        )
+
         logger.info("")
         logger.info(
             "Signal analytics exported:"

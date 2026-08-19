@@ -63,6 +63,7 @@ class TransitionTiming:
     transition_quality: Optional[float]
 
     timing_class: str
+    trigger_names: str = ""
 
 @dataclass
 class TransitionTimingSummary:
@@ -140,34 +141,13 @@ class TransitionTimingAnalyzer:
         market,
         states: pd.Series,
         state_assets: dict[str, str],
+        trigger_history=None,
     ) -> list[TransitionTiming]:
-        """
-        Analyze every state transition.
 
-        Parameters
-        ----------
-        market:
-            Market history dictionary.
+        state_frame = self._prepare_states(states)
 
-        states:
-            Series indexed by trading date containing state names.
-
-        state_assets:
-            Mapping of state name -> actual asset symbol.
-
-        Returns
-        -------
-        list[TransitionTiming]
-        """
-
-        state_frame = self._prepare_states(
-            states
-        )
-
-        transitions = (
-            self._find_transitions(
-                state_frame
-            )
+        transitions = self._find_transitions(
+            state_frame
         )
 
         results = []
@@ -179,6 +159,7 @@ class TransitionTimingAnalyzer:
                 state_frame,
                 transition,
                 state_assets,
+                trigger_history,
             )
 
             results.append(result)
@@ -247,9 +228,10 @@ class TransitionTimingAnalyzer:
     def _analyze_transition(
         self,
         market,
-        states: pd.Series,
-        transition: dict,
-        state_assets: dict[str, str],
+        states,
+        transition,
+        state_assets,
+        trigger_history=None,
     ) -> TransitionTiming:
 
         position = transition["position"]
@@ -257,30 +239,32 @@ class TransitionTimingAnalyzer:
         date = transition["date"]
 
         from_state = transition["from_state"]
-
         to_state = transition["to_state"]
-
-        #
-        # Asset held before the transition.
-        #
 
         exited_asset = state_assets.get(
             from_state,
             "UNKNOWN",
         )
 
-        #
-        # Asset entered by the transition.
-        #
-
         entered_asset = state_assets.get(
             to_state,
             "UNKNOWN",
         )
 
-        #
-        # Find next transition.
-        #
+        # ------------------------------------------------------------
+        # Trigger attribution
+        # ------------------------------------------------------------
+
+        trigger_names = self._trigger_names_for_date(
+            trigger_history,
+            date,
+            from_state,
+            to_state,
+        )
+
+        # ------------------------------------------------------------
+        # Existing transition-boundary logic
+        # ------------------------------------------------------------
 
         next_transition = self._next_transition(
             states,
@@ -290,7 +274,6 @@ class TransitionTimingAnalyzer:
         if next_transition is None:
 
             end_position = len(states) - 1
-
             exit_date = None
 
         else:
@@ -299,9 +282,7 @@ class TransitionTimingAnalyzer:
                 next_transition["position"] - 1
             )
 
-            exit_date = (
-                next_transition["date"]
-            )
+            exit_date = next_transition["date"]
 
         duration_days = (
             end_position
@@ -541,6 +522,298 @@ class TransitionTimingAnalyzer:
 
             timing_class=timing_class,
         )
+
+
+    def _trigger_names_for_date(
+        self,
+        trigger_history,
+        date,
+        from_state,
+        to_state,
+    ):
+        """
+        Return the signal names that were active on the
+        transition date.
+
+        trigger_history may be:
+
+            {
+                pd.Timestamp(...): {
+                    "RVol": True,
+                    "VR": False,
+                    "SPY Breakdown": True,
+                    ...
+                }
+            }
+
+        or a DataFrame indexed by date.
+        """
+
+        if trigger_history is None:
+            return ""
+
+        try:
+            record = trigger_history.loc[date]
+
+        except (KeyError, AttributeError):
+
+            try:
+                record = trigger_history.get(date)
+
+            except AttributeError:
+                return ""
+
+        if record is None:
+            return ""
+
+        names = []
+
+        if hasattr(record, "items"):
+
+            for name, value in record.items():
+
+                if isinstance(value, bool) and value:
+                    names.append(str(name))
+
+                elif value in (1, True):
+                    names.append(str(name))
+
+        elif isinstance(record, dict):
+
+            for name, value in record.items():
+
+                if value:
+                    names.append(str(name))
+
+        return "|".join(names)
+
+    def summarize_triggers(
+        self,
+        transitions: list[TransitionTiming],
+    ):
+        """
+        Aggregate transition performance by trigger.
+
+        A transition with multiple simultaneous triggers contributes
+        to each trigger. This is intentional: we want to know which
+        signals tend to participate in good and bad transitions.
+        """
+
+        import pandas as pd
+
+        rows = []
+
+        for transition in transitions:
+
+            if not transition.trigger_names:
+                continue
+
+            triggers = [
+                name
+                for name in transition.trigger_names.split("|")
+                if name
+            ]
+
+            for trigger in triggers:
+
+                rows.append(
+                    {
+                        "Trigger": trigger,
+                        "Date": transition.date,
+                        "From State": transition.from_state,
+                        "To State": transition.to_state,
+
+                        "Timing Score":
+                            transition.timing_score,
+
+                        "Outcome Score":
+                            transition.outcome_score,
+
+                        "Transition Quality":
+                            transition.transition_quality,
+
+                        "Entry vs 10D Low":
+                            transition.entry_vs_10d_low,
+
+                        "Exit vs Previous 10D High":
+                            transition.exit_vs_previous_10d_high,
+
+                        "Return 10D":
+                            transition.return_10d,
+
+                        "Downside Avoided":
+                            transition.downside_avoided,
+
+                        "Duration":
+                            transition.duration_days,
+
+                        "Whipsaw":
+                            transition.whipsaw,
+                    }
+                )
+
+        if not rows:
+            return pd.DataFrame()
+
+        frame = pd.DataFrame(rows)
+
+        summary = (
+            frame
+            .groupby("Trigger")
+            .agg(
+                Transitions=("Trigger", "count"),
+
+                Avg_Timing_Score=(
+                    "Timing Score",
+                    "mean",
+                ),
+
+                Median_Timing_Score=(
+                    "Timing Score",
+                    "median",
+                ),
+
+                Avg_Outcome_Score=(
+                    "Outcome Score",
+                    "mean",
+                ),
+
+                Avg_Transition_Quality=(
+                    "Transition Quality",
+                    "mean",
+                ),
+
+                Avg_10D_Return=(
+                    "Return 10D",
+                    "mean",
+                ),
+
+                Avg_Downside_Avoided=(
+                    "Downside Avoided",
+                    "mean",
+                ),
+
+                Avg_Duration=(
+                    "Duration",
+                    "mean",
+                ),
+
+                Whipsaw_Rate=(
+                    "Whipsaw",
+                    "mean",
+                ),
+            )
+            .reset_index()
+        )
+
+        return summary
+    
+
+    def test_confirmation_delays(
+        self,
+        transitions: list[TransitionTiming],
+        delays=(0, 1, 2, 3, 5),
+    ):
+        """
+        Diagnostic estimate of what happens if a transition had
+        required confirmation for N additional trading days.
+
+        This does NOT rebuild the strategy state history.
+
+        It answers:
+
+            "If we had waited N days before acting,
+            how often would the original transition have
+            disappeared?"
+
+        This is a first-pass diagnostic, not a replacement backtest.
+        """
+
+        import pandas as pd
+
+        rows = []
+
+        for delay in delays:
+
+            total = len(transitions)
+
+            whipsaws = sum(
+                1
+                for t in transitions
+                if t.whipsaw
+            )
+
+            short_events = sum(
+                1
+                for t in transitions
+                if t.duration_days <= delay
+            )
+
+            retained = (
+                total - short_events
+            )
+
+            rows.append(
+                {
+                    "Confirmation Delay": delay,
+
+                    "Transitions": total,
+
+                    "Would Avoid": short_events,
+
+                    "Would Retain": retained,
+
+                    "Avoided %": (
+                        short_events / total
+                        if total
+                        else 0
+                    ),
+
+                    "Retained %": (
+                        retained / total
+                        if total
+                        else 0
+                    ),
+
+                    "Avg Timing Score": (
+                        pd.Series(
+                            [
+                                t.timing_score
+                                for t in transitions
+                                if t.duration_days > delay
+                                and t.timing_score is not None
+                            ]
+                        ).mean()
+                    ),
+
+                    "Avg Outcome Score": (
+                        pd.Series(
+                            [
+                                t.outcome_score
+                                for t in transitions
+                                if t.duration_days > delay
+                                and t.outcome_score is not None
+                            ]
+                        ).mean()
+                    ),
+
+                    "Avg 10D Return": (
+                        pd.Series(
+                            [
+                                t.return_10d
+                                for t in transitions
+                                if t.duration_days > delay
+                                and t.return_10d is not None
+                            ]
+                        ).mean()
+                    ),
+                }
+            )
+
+        return pd.DataFrame(rows)
+
+
+
 
     # ================================================================
     # MARKET HISTORY

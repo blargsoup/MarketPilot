@@ -153,6 +153,7 @@ class TransitionTimingReport:
 
         return self.output_path
 
+    
     def generate_summary(
         self,
         summaries,
@@ -198,3 +199,49 @@ class TransitionTimingReport:
         )
 
         return output_path
+
+    def generate_trigger_summary(
+        self,
+        summary,
+        filename="transition_timing_triggers.csv",
+    ):
+
+        path = (
+            self.output_path.parent
+            / filename
+        )
+
+        path.parent.mkdir(
+            parents=True,
+            exist_ok=True,
+        )
+
+        summary.to_csv(
+            path,
+            index=False,
+        )
+
+        return path
+
+    def generate_confirmation_analysis(
+        self,
+        analysis,
+        filename="transition_confirmation_analysis.csv",
+    ):
+
+        path = (
+            self.output_path.parent
+            / filename
+        )
+
+        path.parent.mkdir(
+            parents=True,
+            exist_ok=True,
+        )
+
+        analysis.to_csv(
+            path,
+            index=False,
+        )
+
+        return path
