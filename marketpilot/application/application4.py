@@ -493,84 +493,24 @@ class Application:
         # Transition timing analytics
         # ------------------------------------------------------------
 
-        timing_analyzer = TransitionTimingAnalyzer(
-            short_transition_days=5,
-            lookahead_days=20,
-        )
+        timing_analyzer = TransitionTimingAnalyzer()
+
+        timing_report = TransitionTimingReport()
+
+        logger.info("")
+        logger.info("Transition Timing Analytics")
+        logger.info("------------------------------")
 
         for comparison in strategy_comparisons:
 
             #
-            # Only analyze strategies that have simulations.
+            # Get the strategy name safely.
             #
 
-            comparison_backtest = comparison.backtest
-
-            if not comparison_backtest.simulations:
-                continue
-
-            #
-            # Build the state history.
-            #
-
-            states = pd.Series(
-                {
-                    simulation.context.current_date:
-                        simulation.strategy.new_state.name
-                    for simulation
-                    in comparison_backtest.simulations
-                }
-            )
-
-            #
-            # Determine the strategy's asset mapping.
-            #
-            # StrategyProfile already provides the canonical mapping.
-            #
-
-            profile = comparison.strategy.profile
-
-            state_assets = {
-                "AGGRESSIVE": (
-                    profile.aggressive_asset
-                ),
-                "MODERATE": (
-                    profile.moderate_asset
-                ),
-                "DEFENSIVE": (
-                    profile.cash_asset
-                ),
-            }
-
-            #
-            # If this is the normal three-state NASDAQ strategy,
-            # preserve its actual defensive selector asset where
-            # available.
-            #
-            # The 2-State Cash strategy intentionally remains CASH.
-            #
-
-            if (
-                profile.name
-                == "NASDAQ"
-                and hasattr(
-                    profile,
-                    "defensive_asset",
-                )
-            ):
-
-                state_assets["DEFENSIVE"] = (
-                    profile.defensive_asset
-                )
-
-            transitions = timing_analyzer.analyze(
-                market=market,
-                states=states,
-                state_assets=state_assets,
-            )
+            name = comparison.name
 
             safe_name = (
-                comparison.name
+                name
                 .lower()
                 .replace(" ", "_")
                 .replace("/", "_")
@@ -578,19 +518,53 @@ class Application:
                 .replace(")", "")
             )
 
-            output_path = (
-                f"output/transition_timing_{safe_name}.csv"
+            logger.info(
+                "Analyzing transition timing: %s",
+                name,
             )
 
-            TransitionTimingReport(
-                output_path=output_path,
-            ).generate(
-                transitions
+            #
+            # Generate transition-level analytics.
+            #
+
+            transitions = timing_analyzer.analyze(
+                comparison,
+            )
+
+            #
+            # Detailed transition CSV.
+            #
+
+            timing_path = timing_report.generate(
+                transitions,
+                output_path=(
+                    f"output/transition_timing_{safe_name}.csv"
+                ),
+            )
+
+            #
+            # Aggregate timing summary.
+            #
+
+            summaries = timing_analyzer.summarize(
+                transitions,
+            )
+
+            summary_path = timing_report.generate_summary(
+                summaries,
+                output_path=(
+                    f"output/transition_timing_summary_{safe_name}.csv"
+                ),
             )
 
             logger.info(
-                "Transition timing report: %s",
-                output_path,
+                "  Detailed : %s",
+                timing_path,
+            )
+
+            logger.info(
+                "  Summary  : %s",
+                summary_path,
             )
 
 
