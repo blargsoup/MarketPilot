@@ -47,6 +47,13 @@ from marketpilot.reports import (
 from marketpilot.diagnostics.strategy_report import StrategyReport
 from marketpilot.reports import CheckpointReport
 from marketpilot.reports import SignalReport
+from marketpilot.reports.transition_timing import (
+    TransitionTimingAnalyzer,
+)
+
+from marketpilot.reports.transition_timing_report import (
+    TransitionTimingReport,
+)
 
 
 class Application:
@@ -490,6 +497,49 @@ class Application:
 
         checkpoint_paths = checkpoint_report.generate(
             strategy_comparisons,
+        )
+
+        # ------------------------------------------------------------
+        # Transition timing analytics
+        # ------------------------------------------------------------
+
+        state_series = pd.Series(
+            {
+                simulation.context.current_date:
+                    simulation.strategy.new_state.name
+                for simulation
+                in backtest_result.simulations
+            }
+        )
+
+        equity_series = pd.Series(
+            {
+                point.date:
+                    point.equity
+                for point
+                in backtest_result.equity_curve
+            }
+        )
+
+        timing_analyzer = TransitionTimingAnalyzer(
+            short_transition_days=5,
+            lookahead_days=20,
+        )
+
+        transition_timing = timing_analyzer.analyze(
+            equity=equity_series,
+            states=state_series,
+        )
+
+        transition_timing_path = (
+            TransitionTimingReport().generate(
+                transition_timing,
+            )
+        )
+
+        logger.info(
+            "Transition timing report: %s",
+            transition_timing_path,
         )
 
         logger.info("")
