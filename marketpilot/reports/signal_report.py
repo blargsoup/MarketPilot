@@ -30,15 +30,62 @@ class SignalReport:
             exist_ok=True,
         )
 
-        analytics = SignalAnalytics()
+        #
+        # Collect signal events from every strategy comparison.
+        #
+        events = []
 
-        (
-            signal_events,
-            signal_summary,
-            transition_events,
-        ) = analytics.analyze(
-            comparisons
+        for comparison in comparisons:
+
+            backtest = getattr(
+                comparison,
+                "backtest",
+                None,
+            )
+
+            if backtest is None:
+                continue
+
+            #
+            # Signal events may be stored directly on the
+            # backtest result.
+            #
+            comparison_events = getattr(
+                backtest,
+                "signal_events",
+                None,
+            )
+
+            if comparison_events:
+
+                events.extend(
+                    comparison_events
+                )
+
+        #
+        # Build analytics using the event collection.
+        #
+        analytics = SignalAnalytics(
+            events
         )
+
+        #
+        # Analyze the collected events.
+        #
+        signal_events = analytics.analyze()
+
+        #
+        # Aggregate signal results.
+        #
+        signal_summary = analytics.summarize(
+            signal_events
+        )
+
+        #
+        # Transition analytics are derived from the
+        # attribution rows.
+        #
+        transition_events = signal_events
 
         paths = {}
 
@@ -57,19 +104,28 @@ class SignalReport:
             / "transition_analytics.csv"
         )
 
-        signal_events.to_csv(
+        #
+        # Write event attribution.
+        #
+        analytics.write_attribution(
+            signal_events,
             paths["signal_events"],
-            index=False,
         )
 
-        signal_summary.to_csv(
+        #
+        # Write aggregate summary.
+        #
+        analytics.write_summary(
+            signal_summary,
             paths["signal_summary"],
-            index=False,
         )
 
-        transition_events.to_csv(
+        #
+        # Write transition analytics.
+        #
+        analytics.write_attribution(
+            transition_events,
             paths["transition_analytics"],
-            index=False,
         )
 
         return paths
