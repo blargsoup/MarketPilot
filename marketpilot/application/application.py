@@ -365,6 +365,7 @@ class Application:
 
         signal_paths = signal_report.generate(
             strategy_comparisons,
+            market,
         )
 
         signal_events_path = signal_paths["signal_events"]
