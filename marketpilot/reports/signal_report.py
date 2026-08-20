@@ -50,6 +50,7 @@ class SignalReport:
             events = self._build_events(
                 comparison,
                 simulations,
+                market,
             )
 
             all_signal_events.extend(
@@ -135,6 +136,7 @@ class SignalReport:
         self,
         comparison,
         simulations,
+        market,
     ):
         """
         Convert daily SimulationResult objects into signal events.
@@ -152,7 +154,7 @@ class SignalReport:
 
         strategy_name = comparison.name
 
-        for simulation in simulations:
+        for index, simulation in enumerate(simulations):
 
             signals = simulation.signals
 
@@ -206,9 +208,6 @@ class SignalReport:
                     ),
             }
 
-            #
-            # Only record the transition from FALSE -> TRUE.
-            #
             for signal_name, active in signal_values.items():
 
                 previous = previous_signals.get(
@@ -222,15 +221,10 @@ class SignalReport:
                 events.append(
                     {
                         "Strategy": strategy_name,
-
                         "Date": date,
-
                         "Signal": signal_name,
-
                         "State": state,
-
                         "Asset": simulation.symbol,
-
                         "Equity": simulation.equity,
 
                         "RVol": getattr(
@@ -266,9 +260,189 @@ class SignalReport:
                     }
                 )
 
+                self._add_forward_metrics(
+                    events[-1],
+                    simulations,
+                    index,
+                    market,
+                )
+
             previous_signals = signal_values
 
         return events
+
+    def _add_forward_metrics(
+        self,
+        event,
+        simulations,
+        index,
+        market,
+    ):
+        """
+        Calculate forward performance from the signal date.
+
+        Uses the full historical market supplied to generate(), rather
+        than the point-in-time MarketView stored inside SimulationResult.
+
+        Forward windows are measured in trading days.
+        """
+
+        asset = event["Asset"]
+
+        base_date = simulations[
+            index
+        ].context.current_date
+
+        base_price = self._historical_close(
+            market,
+            asset,
+            base_date,
+        )
+
+        if base_price is None:
+            return
+
+        horizons = (
+            5,
+            10,
+            20,
+            60,
+            120,
+        )
+
+        for horizon in horizons:
+
+            future = simulations[
+                index + 1:
+                index + horizon + 1
+            ]
+
+            if len(future) < horizon:
+                continue
+
+            prices = []
+
+            for simulation in future:
+
+                date = (
+                    simulation.context.current_date
+                )
+
+                price = self._historical_close(
+                    market,
+                    asset,
+                    date,
+                )
+
+                if price is not None:
+                    prices.append(
+                        (
+                            simulation,
+                            price,
+                        )
+                    )
+
+            if len(prices) < horizon:
+                continue
+
+            final_price = prices[-1][1]
+
+            event[
+                f"Asset Return +{horizon}d"
+            ] = (
+                final_price
+                / base_price
+                - 1.0
+            )
+
+            max_gain = None
+            max_gain_day = None
+
+            max_drawdown = None
+            max_drawdown_day = None
+
+            for day_number, (
+                simulation,
+                price,
+            ) in enumerate(
+                prices,
+                start=1,
+            ):
+
+                return_value = (
+                    price
+                    / base_price
+                    - 1.0
+                )
+
+                if (
+                    max_gain is None
+                    or return_value > max_gain
+                ):
+                    max_gain = return_value
+                    max_gain_day = day_number
+
+                if (
+                    max_drawdown is None
+                    or return_value < max_drawdown
+                ):
+                    max_drawdown = return_value
+                    max_drawdown_day = day_number
+
+            event[
+                f"Max Gain +{horizon}d"
+            ] = max_gain
+
+            event[
+                f"Days To Max Gain +{horizon}d"
+            ] = max_gain_day
+
+            event[
+                f"Max Drawdown +{horizon}d"
+            ] = max_drawdown
+
+            event[
+                f"Days To Max Drawdown +{horizon}d"
+            ] = max_drawdown_day
+
+
+    def _historical_close(
+        self,
+        market,
+        symbol,
+        date,
+    ):
+        """
+        Return the actual historical close for a symbol/date.
+        """
+
+        try:
+
+            history = market[symbol]
+
+            data = history.data
+
+            if date not in data.index:
+                return None
+
+            return float(
+                data.loc[
+                    date,
+                    "Close",
+                ]
+            )
+
+        except (
+            KeyError,
+            AttributeError,
+            TypeError,
+            ValueError,
+        ):
+
+            return None
+
+
+
 
     # ==================================================================
     # Helpers
