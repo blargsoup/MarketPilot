@@ -54,6 +54,17 @@ from marketpilot.reports.transition_timing import (
 from marketpilot.reports.transition_timing_report import (
     TransitionTimingReport,
 )
+from marketpilot.reports.transition_analytics import (
+    TransitionAnalytics,
+)
+
+from marketpilot.reports.transition_analytics_report import (
+    TransitionAnalyticsReport,
+)
+
+from marketpilot.reports.period_performance import (
+    PeriodPerformanceAnalyzer,
+)
 
 
 class Application:
@@ -616,6 +627,212 @@ class Application:
                 "  Summary  : %s",
                 summary_path,
             )
+
+        # ------------------------------------------------------------
+        # Aggregate transition analytics
+        # ------------------------------------------------------------
+
+        transition_analytics = (
+            TransitionAnalytics()
+        )
+
+        transition_analytics_report = (
+            TransitionAnalyticsReport()
+        )
+
+        period_performance = (
+            PeriodPerformanceAnalyzer()
+        )
+
+        all_transition_aggregates = []
+        all_period_performance = []
+
+        logger.info("")
+        logger.info(
+            "Aggregate Transition Analytics"
+        )
+        logger.info(
+            "------------------------------"
+        )
+
+        for comparison in strategy_comparisons:
+
+            name = comparison.name
+
+            safe_name = (
+                name
+                .lower()
+                .replace(" ", "_")
+                .replace("/", "_")
+                .replace("(", "")
+                .replace(")", "")
+            )
+
+            #
+            # Rebuild the exact state history used above.
+            #
+
+            states = pd.Series(
+                {
+                    simulation.context.current_date:
+                        simulation.strategy.new_state.name
+                    for simulation
+                    in comparison.backtest.simulations
+                }
+            )
+
+            profile = comparison.profile
+
+            state_assets = {
+                "AGGRESSIVE":
+                    profile.aggressive_asset,
+
+                "MODERATE":
+                    profile.moderate_asset,
+
+                "DEFENSIVE":
+                    (
+                        profile.defensive_assets[0]
+                        if profile.defensive_assets
+                        else profile.cash_asset
+                    ),
+            }
+
+            #
+            # Generate transition objects.
+            #
+
+            transitions = (
+                timing_analyzer.analyze(
+                    market,
+                    states,
+                    state_assets,
+                )
+            )
+
+            #
+            # Full + historical-period transition aggregates.
+            #
+
+            aggregates = (
+                transition_analytics.analyze_periods(
+                    transitions,
+                    strategy_name=name,
+                )
+            )
+
+            all_transition_aggregates.extend(
+                aggregates
+            )
+
+            #
+            # Performance by historical period.
+            #
+
+            performance = (
+                period_performance.analyze(
+                    comparison
+                )
+            )
+
+            all_period_performance.extend(
+                performance
+            )
+
+            logger.info(
+                "  %s",
+                name,
+            )
+
+            for aggregate in aggregates:
+
+                logger.info(
+                    "    %-12s "
+                    "Transitions=%4d "
+                    "Whipsaws=%3d "
+                    "Exit=%.2f%% "
+                    "Re-entry=%.2f%% "
+                    "Defensive=%.1fd",
+                    aggregate.period,
+                    aggregate.transitions,
+                    aggregate.whipsaws,
+                    (
+                        aggregate.average_exit_timing
+                        * 100
+                        if aggregate.average_exit_timing
+                        is not None
+                        else 0
+                    ),
+                    (
+                        aggregate.average_reentry_timing
+                        * 100
+                        if aggregate.average_reentry_timing
+                        is not None
+                        else 0
+                    ),
+                    (
+                        aggregate.average_defensive_duration
+                        if aggregate.average_defensive_duration
+                        is not None
+                        else 0
+                    ),
+                )
+
+        #
+        # Transition analytics CSV.
+        #
+
+        transition_analytics_path = (
+            transition_analytics_report.generate(
+                all_transition_aggregates,
+                filename=(
+                    "transition_analytics.csv"
+                ),
+            )
+        )
+
+        #
+        # Period performance CSV.
+        #
+
+        period_rows = [
+            {
+                "Strategy": p.strategy,
+                "Period": p.period,
+                "Start Date": p.start_date,
+                "End Date": p.end_date,
+                "Starting Equity": p.starting_equity,
+                "Ending Equity": p.ending_equity,
+                "Total Return": p.total_return,
+                "CAGR": p.cagr,
+                "Max Drawdown": p.max_drawdown,
+                "Trades": p.trades,
+            }
+            for p in all_period_performance
+        ]
+
+        period_performance_path = ("output/performance_periods.csv")
+        
+
+        pd.DataFrame(
+            period_rows
+        ).to_csv(
+            period_performance_path,
+            index=False,
+        )
+
+        logger.info("")
+        logger.info(
+            "Aggregate analytics:"
+        )
+        logger.info(
+            "    %s",
+            transition_analytics_path,
+        )
+        logger.info(
+            "    %s",
+            period_performance_path,
+        )
         
 
         logger.info("")

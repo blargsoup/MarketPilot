@@ -963,7 +963,7 @@ class TransitionTimingAnalyzer:
         )
 
         window = history.iloc[
-            start:position + 1
+            start:position
         ]["Close"]
 
         if window.empty:
