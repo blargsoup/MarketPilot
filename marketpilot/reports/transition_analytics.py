@@ -1,19 +1,24 @@
 """
-Higher-level transition analytics.
+Aggregate transition analytics.
 
-Consumes TransitionTiming objects and produces:
-    - transition counts
-    - whipsaw rates
-    - exit timing
-    - re-entry timing
-    - defensive duration
-    - missed upside
-    - avoided downside
+Important distinction:
 
-Also supports historical period segmentation.
+    STATE TRANSITION
+        A change in the strategy's internal signal state.
 
-This module intentionally does NOT modify the strategy or rebuild
-the backtest. It is purely analytical.
+    PORTFOLIO TRANSITION
+        A change in the actual asset held by the strategy.
+
+A 2-State strategy may have:
+
+    AGGRESSIVE -> MODERATE
+
+while remaining invested in TQQQ.
+
+That is a state transition, but NOT a trade.
+
+All trade-related analytics in this module therefore use the
+portfolio asset transition rather than the state transition.
 """
 
 from dataclasses import dataclass
@@ -28,7 +33,9 @@ class TransitionAggregate:
     strategy: str
     period: str
 
-    transitions: int
+    state_transitions: int
+    trades: int
+
     whipsaws: int
     whipsaw_rate: float | None
 
@@ -52,40 +59,48 @@ class TransitionAggregate:
 
 class TransitionAnalytics:
     """
-    Aggregate transition-level analytics.
+    Aggregate TransitionTiming records.
 
-    A TransitionTiming object represents one actual state change.
-    This class deliberately works from those actual transitions rather
-    than reconstructing signals.
+    The analyzer receives both:
+        - the transition records
+        - the strategy profile
+
+    so it can determine whether each state transition actually
+    changes the portfolio position.
     """
 
     def analyze(
         self,
         transitions,
         strategy_name="",
+        profile=None,
     ):
         """
-        Return one aggregate for the complete transition set.
+        Analyze the complete transition history.
         """
 
         return self._aggregate(
             transitions,
             strategy_name,
             "FULL",
+            profile,
         )
 
     def analyze_periods(
         self,
         transitions,
         strategy_name="",
+        profile=None,
     ):
         """
-        Return aggregates for all configured historical periods.
+        Analyze the configured historical periods.
         """
 
         results = []
 
-        for period_name, definition in ANALYSIS_PERIODS.items():
+        for period_name, definition in (
+            ANALYSIS_PERIODS.items()
+        ):
 
             filtered = self._filter_period(
                 transitions,
@@ -98,6 +113,7 @@ class TransitionAnalytics:
                     filtered,
                     strategy_name,
                     period_name,
+                    profile,
                 )
             )
 
@@ -112,16 +128,20 @@ class TransitionAnalytics:
         transitions,
         strategy_name,
         period_name,
+        profile,
     ):
 
         transitions = list(transitions)
 
         if not transitions:
+
             return TransitionAggregate(
                 strategy=strategy_name,
                 period=period_name,
 
-                transitions=0,
+                state_transitions=0,
+                trades=0,
+
                 whipsaws=0,
                 whipsaw_rate=None,
 
@@ -143,70 +163,128 @@ class TransitionAnalytics:
                 average_transition_quality=None,
             )
 
-        frame = pd.DataFrame(
-            [
+        records = []
+
+        for transition in transitions:
+
+            from_asset = self._asset_for_state(
+                transition.from_state,
+                profile,
+            )
+
+            to_asset = self._asset_for_state(
+                transition.to_state,
+                profile,
+            )
+
+            trade_occurred = (
+                from_asset != to_asset
+            )
+
+            records.append(
                 {
-                    "date": t.date,
+                    "date": transition.date,
 
-                    "from_state": t.from_state,
-                    "to_state": t.to_state,
+                    "from_state":
+                        transition.from_state,
 
-                    "whipsaw": t.whipsaw,
+                    "to_state":
+                        transition.to_state,
 
-                    "duration": t.duration_days,
+                    "from_asset":
+                        from_asset,
 
-                    "entry_timing": (
-                        t.entry_vs_10d_low
-                        if self._is_reentry(t)
-                        else None
-                    ),
+                    "to_asset":
+                        to_asset,
 
-                    "exit_timing": (
-                        t.exit_vs_previous_10d_high
-                        if self._is_exit(t)
-                        else None
-                    ),
+                    "trade_occurred":
+                        trade_occurred,
 
-                    "missed_upside": (
-                        self._missed_upside(t)
-                    ),
+                    "whipsaw":
+                        (
+                            transition.whipsaw
+                            if trade_occurred
+                            else False
+                        ),
 
-                    "avoided_downside": (
-                        self._avoided_downside(t)
-                    ),
+                    "duration":
+                        transition.duration_days,
 
-                    "quality": (
-                        t.transition_quality
-                    ),
+                    "exit_timing":
+                        self._exit_timing(
+                            transition,
+                            trade_occurred,
+                        ),
+
+                    "reentry_timing":
+                        self._reentry_timing(
+                            transition,
+                            trade_occurred,
+                        ),
+
+                    "missed_upside":
+                        self._missed_upside(
+                            transition,
+                            trade_occurred,
+                        ),
+
+                    "avoided_downside":
+                        self._avoided_downside(
+                            transition,
+                            trade_occurred,
+                        ),
+
+                    "quality":
+                        (
+                            transition.transition_quality
+                            if trade_occurred
+                            else None
+                        ),
                 }
-                for t in transitions
-            ]
-        )
+            )
 
-        exits = frame[
-            frame["exit_timing"].notna()
+        frame = pd.DataFrame(records)
+
+        trades = frame[
+            frame["trade_occurred"]
         ]
 
-        entries = frame[
-            frame["entry_timing"].notna()
+        exits = trades[
+            trades["to_state"]
+            == "DEFENSIVE"
+        ]
+
+        reentries = trades[
+            (
+                trades["from_state"]
+                == "DEFENSIVE"
+            )
+            &
+            (
+                trades["to_state"]
+                != "DEFENSIVE"
+            )
         ]
 
         defensive = frame[
-            frame["to_state"] == "DEFENSIVE"
+            frame["to_state"]
+            == "DEFENSIVE"
         ]
 
         return TransitionAggregate(
             strategy=strategy_name,
             period=period_name,
 
-            transitions=len(frame),
+            state_transitions=len(frame),
+
+            trades=len(trades),
 
             whipsaws=int(
-                frame["whipsaw"].sum()
+                trades["whipsaw"].sum()
             ),
 
-            whipsaw_rate=self._mean(
-                frame["whipsaw"]
+            whipsaw_rate=self._rate(
+                trades["whipsaw"]
             ),
 
             average_exit_timing=self._mean(
@@ -218,11 +296,11 @@ class TransitionAnalytics:
             ),
 
             average_reentry_timing=self._mean(
-                entries["entry_timing"]
+                reentries["reentry_timing"]
             ),
 
             median_reentry_timing=self._median(
-                entries["entry_timing"]
+                reentries["reentry_timing"]
             ),
 
             average_defensive_duration=self._mean(
@@ -234,113 +312,258 @@ class TransitionAnalytics:
             ),
 
             average_missed_upside=self._mean(
-                frame["missed_upside"]
+                exits["missed_upside"]
             ),
 
             median_missed_upside=self._median(
-                frame["missed_upside"]
+                exits["missed_upside"]
             ),
 
             average_avoided_downside=self._mean(
-                frame["avoided_downside"]
+                exits["avoided_downside"]
             ),
 
             median_avoided_downside=self._median(
-                frame["avoided_downside"]
+                exits["avoided_downside"]
             ),
 
             average_transition_quality=self._mean(
-                frame["quality"]
+                trades["quality"]
             ),
         )
 
     # ================================================================
-    # CLASSIFICATION
+    # STATE → ASSET MAPPING
     # ================================================================
 
     @staticmethod
-    def _is_exit(transition):
+    def _asset_for_state(
+        state,
+        profile,
+    ):
+        """
+        Resolve the actual portfolio asset for a strategy state.
 
-        return (
-            transition.to_state
-            == "DEFENSIVE"
-        )
+        Supports the profile structures currently used by MarketPilot,
+        while deliberately avoiding assumptions about strategy names.
+        """
 
-    @staticmethod
-    def _is_reentry(transition):
+        if profile is None:
+            return state
 
-        return (
-            transition.to_state
-            in (
-                "AGGRESSIVE",
-                "MODERATE",
+        state = str(
+            state
+        ).upper()
+
+        #
+        # Common profile attributes.
+        #
+
+        if state == "AGGRESSIVE":
+
+            value = getattr(
+                profile,
+                "aggressive_asset",
+                None,
             )
-            and transition.from_state
-            == "DEFENSIVE"
+
+            if value is not None:
+                return str(value)
+
+        if state == "MODERATE":
+
+            value = getattr(
+                profile,
+                "moderate_asset",
+                None,
+            )
+
+            if value is not None:
+                return str(value)
+
+        if state == "DEFENSIVE":
+
+            #
+            # Some profiles have a single defensive asset.
+            #
+
+            value = getattr(
+                profile,
+                "defensive_asset",
+                None,
+            )
+
+            if value is not None:
+                return str(value)
+
+            #
+            # Others use defensive_assets.
+            #
+
+            values = getattr(
+                profile,
+                "defensive_assets",
+                None,
+            )
+
+            if values:
+
+                return str(
+                    values[0]
+                )
+
+            #
+            # Cash defensive profiles.
+            #
+
+            value = getattr(
+                profile,
+                "cash_asset",
+                None,
+            )
+
+            if value is not None:
+                return str(value)
+
+            value = getattr(
+                profile,
+                "defensive",
+                None,
+            )
+
+            if value is not None:
+                return str(value)
+
+        #
+        # Last-resort mapping. This should only be reached if a
+        # profile doesn't expose the expected asset attributes.
+        #
+
+        return state
+
+    # ================================================================
+    # TRADE CLASSIFICATION
+    # ================================================================
+
+    @staticmethod
+    def _exit_timing(
+        transition,
+        trade_occurred,
+    ):
+
+        if not trade_occurred:
+            return None
+
+        if (
+            str(
+                transition.to_state
+            ).upper()
+            != "DEFENSIVE"
+        ):
+            return None
+
+        return getattr(
+            transition,
+            "exit_vs_previous_10d_high",
+            None,
         )
 
-    # ================================================================
-    # MISSED UPSIDE
-    # ================================================================
-
     @staticmethod
-    def _missed_upside(transition):
+    def _reentry_timing(
+        transition,
+        trade_occurred,
+    ):
 
-        """
-        For an exit:
+        if not trade_occurred:
+            return None
 
-            How much favorable movement occurred in the exited
-            asset while the strategy was defensive?
-
-        We use the existing MFE-like measurement already calculated
-        by TransitionTiming.
-
-        For non-exits there is no missed-upside measurement.
-        """
-
-        if not TransitionAnalytics._is_exit(
-            transition
+        if (
+            str(
+                transition.from_state
+            ).upper()
+            != "DEFENSIVE"
         ):
             return None
 
-        if transition.upside_captured is None:
-            return None
-
-        return transition.upside_captured
-
-    # ================================================================
-    # AVOIDED DOWNSIDE
-    # ================================================================
+        return getattr(
+            transition,
+            "entry_vs_10d_low",
+            None,
+        )
 
     @staticmethod
-    def _avoided_downside(transition):
+    def _missed_upside(
+        transition,
+        trade_occurred,
+    ):
 
-        """
-        The existing downside_avoided metric is negative when the
-        exited asset subsequently falls.
+        if not trade_occurred:
+            return None
 
-        Convert it to a positive "benefit" number.
-
-        Example:
-
-            -0.25 -> +0.25 avoided downside
-
-        If the asset rises instead, the value becomes zero.
-        """
-
-        if not TransitionAnalytics._is_exit(
-            transition
+        if (
+            str(
+                transition.to_state
+            ).upper()
+            != "DEFENSIVE"
         ):
             return None
 
-        value = transition.downside_avoided
+        #
+        # Prefer the explicit field if it exists.
+        #
+
+        value = getattr(
+            transition,
+            "missed_upside",
+            None,
+        )
+
+        if value is not None:
+            return value
+
+        #
+        # Backward compatibility with the existing analyzer.
+        #
+
+        return getattr(
+            transition,
+            "upside_captured",
+            None,
+        )
+
+    @staticmethod
+    def _avoided_downside(
+        transition,
+        trade_occurred,
+    ):
+
+        if not trade_occurred:
+            return None
+
+        if (
+            str(
+                transition.to_state
+            ).upper()
+            != "DEFENSIVE"
+        ):
+            return None
+
+        value = getattr(
+            transition,
+            "downside_avoided",
+            None,
+        )
 
         if value is None:
             return None
 
+        #
+        # Report avoided downside as a positive number.
+        #
+
         return max(
             0.0,
-            -value,
+            -float(value),
         )
 
     # ================================================================
@@ -392,13 +615,13 @@ class TransitionAnalytics:
     # ================================================================
 
     @staticmethod
-    def _mean(series):
+    def _mean(values):
 
-        if series is None:
+        if values is None:
             return None
 
         series = pd.Series(
-            series
+            values
         ).dropna()
 
         if series.empty:
@@ -409,13 +632,13 @@ class TransitionAnalytics:
         )
 
     @staticmethod
-    def _median(series):
+    def _median(values):
 
-        if series is None:
+        if values is None:
             return None
 
         series = pd.Series(
-            series
+            values
         ).dropna()
 
         if series.empty:
@@ -423,4 +646,21 @@ class TransitionAnalytics:
 
         return float(
             series.median()
+        )
+
+    @staticmethod
+    def _rate(values):
+
+        if values is None:
+            return None
+
+        series = pd.Series(
+            values
+        ).dropna()
+
+        if series.empty:
+            return None
+
+        return float(
+            series.mean()
         )

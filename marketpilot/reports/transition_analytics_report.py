@@ -1,5 +1,5 @@
 """
-CSV output for aggregate transition analytics.
+CSV report for aggregate transition analytics.
 """
 
 from pathlib import Path
@@ -26,68 +26,60 @@ class TransitionAnalyticsReport:
 
         rows = []
 
-        for a in aggregates:
+        for aggregate in aggregates:
 
             rows.append(
                 {
-                    "Strategy": a.strategy,
-                    "Period": a.period,
+                    "Strategy":
+                        aggregate.strategy,
 
-                    "Transitions": (
-                        a.transitions
-                    ),
+                    "Period":
+                        aggregate.period,
 
-                    "Whipsaws": (
-                        a.whipsaws
-                    ),
+                    "State Transitions":
+                        aggregate.state_transitions,
 
-                    "Whipsaw Rate": (
-                        a.whipsaw_rate
-                    ),
+                    "Trades":
+                        aggregate.trades,
 
-                    "Average Exit Timing": (
-                        a.average_exit_timing
-                    ),
+                    "Whipsaws":
+                        aggregate.whipsaws,
 
-                    "Median Exit Timing": (
-                        a.median_exit_timing
-                    ),
+                    "Whipsaw Rate":
+                        aggregate.whipsaw_rate,
 
-                    "Average Re-entry Timing": (
-                        a.average_reentry_timing
-                    ),
+                    "Average Exit Timing":
+                        aggregate.average_exit_timing,
 
-                    "Median Re-entry Timing": (
-                        a.median_reentry_timing
-                    ),
+                    "Median Exit Timing":
+                        aggregate.median_exit_timing,
 
-                    "Average Defensive Duration": (
-                        a.average_defensive_duration
-                    ),
+                    "Average Re-entry Timing":
+                        aggregate.average_reentry_timing,
 
-                    "Median Defensive Duration": (
-                        a.median_defensive_duration
-                    ),
+                    "Median Re-entry Timing":
+                        aggregate.median_reentry_timing,
 
-                    "Average Missed Upside": (
-                        a.average_missed_upside
-                    ),
+                    "Average Defensive Duration":
+                        aggregate.average_defensive_duration,
 
-                    "Median Missed Upside": (
-                        a.median_missed_upside
-                    ),
+                    "Median Defensive Duration":
+                        aggregate.median_defensive_duration,
 
-                    "Average Avoided Downside": (
-                        a.average_avoided_downside
-                    ),
+                    "Average Missed Upside":
+                        aggregate.average_missed_upside,
 
-                    "Median Avoided Downside": (
-                        a.median_avoided_downside
-                    ),
+                    "Median Missed Upside":
+                        aggregate.median_missed_upside,
 
-                    "Average Transition Quality": (
-                        a.average_transition_quality
-                    ),
+                    "Average Avoided Downside":
+                        aggregate.average_avoided_downside,
+
+                    "Median Avoided Downside":
+                        aggregate.median_avoided_downside,
+
+                    "Average Transition Quality":
+                        aggregate.average_transition_quality,
                 }
             )
 
@@ -103,6 +95,160 @@ class TransitionAnalyticsReport:
         path.parent.mkdir(
             parents=True,
             exist_ok=True,
+        )
+
+        frame.to_csv(
+            path,
+            index=False,
+        )
+
+        return path
+
+    def generate_detailed(
+        self,
+        transitions_by_strategy,
+        filename="transition_analytics_detailed.csv",
+    ):
+        """
+        Write the actual state and portfolio transitions.
+
+        transitions_by_strategy should be:
+
+            [
+                (
+                    strategy_name,
+                    transitions,
+                    profile,
+                ),
+                ...
+            ]
+        """
+
+        rows = []
+
+        from marketpilot.reports.transition_analytics import (
+            TransitionAnalytics,
+        )
+
+        analyzer = TransitionAnalytics()
+
+        for (
+            strategy_name,
+            transitions,
+            profile,
+        ) in transitions_by_strategy:
+
+            for transition in transitions:
+
+                from_asset = (
+                    analyzer._asset_for_state(
+                        transition.from_state,
+                        profile,
+                    )
+                )
+
+                to_asset = (
+                    analyzer._asset_for_state(
+                        transition.to_state,
+                        profile,
+                    )
+                )
+
+                trade = (
+                    from_asset != to_asset
+                )
+
+                rows.append(
+                    {
+                        "Strategy":
+                            strategy_name,
+
+                        "Date":
+                            transition.date,
+
+                        "From State":
+                            transition.from_state,
+
+                        "To State":
+                            transition.to_state,
+
+                        "From Asset":
+                            from_asset,
+
+                        "To Asset":
+                            to_asset,
+
+                        "Trade":
+                            trade,
+
+                        "Whipsaw":
+                            (
+                                transition.whipsaw
+                                if trade
+                                else False
+                            ),
+
+                        "Duration Days":
+                            transition.duration_days,
+
+                        "Exit Timing":
+                            (
+                                transition.exit_vs_previous_10d_high
+                                if (
+                                    trade
+                                    and
+                                    str(
+                                        transition.to_state
+                                    ).upper()
+                                    == "DEFENSIVE"
+                                )
+                                else None
+                            ),
+
+                        "Re-entry Timing":
+                            (
+                                transition.entry_vs_10d_low
+                                if (
+                                    trade
+                                    and
+                                    str(
+                                        transition.from_state
+                                    ).upper()
+                                    == "DEFENSIVE"
+                                )
+                                else None
+                            ),
+
+                        "Downside Avoided":
+                            (
+                                transition.downside_avoided
+                                if (
+                                    trade
+                                    and
+                                    str(
+                                        transition.to_state
+                                    ).upper()
+                                    == "DEFENSIVE"
+                                )
+                                else None
+                            ),
+
+                        "Transition Quality":
+                            (
+                                transition.transition_quality
+                                if trade
+                                else None
+                            ),
+                    }
+                )
+
+        frame = pd.DataFrame(
+            rows
+        )
+
+        path = (
+            self.output_dir
+            / filename
         )
 
         frame.to_csv(
