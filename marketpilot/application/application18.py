@@ -357,9 +357,9 @@ class Application:
             detailed_checkpoint_path,
         )
 
-        #
-        # Signal / transition analytics
-        #
+        # ------------------------------------------------------------
+        # Signal analytics
+        # ------------------------------------------------------------
 
         signal_report = SignalReport()
 
@@ -367,13 +367,21 @@ class Application:
             strategy_comparisons,
         )
 
-        logger.info("")
-        logger.info(
-            "Signal analytics exported:"
+        signal_events_path = signal_paths["signal_events"]
+
+        signal_events = pd.read_csv(
+            signal_events_path,
         )
 
-        for name, path in signal_paths.items():
+        logger.info(
+            "Loaded signal event history: %s",
+            signal_events_path,
+        )
 
+        logger.info("")
+        logger.info("Signal analytics exported:")
+
+        for name, path in signal_paths.items():
             logger.info(
                 "    %-24s %s",
                 name,
@@ -504,7 +512,7 @@ class Application:
         for comparison in strategy_comparisons:
 
             #
-            # Get the strategy name safely.
+            # Strategy identity
             #
 
             name = comparison.name
@@ -524,11 +532,56 @@ class Application:
             )
 
             #
+            # Build state history from the actual backtest.
+            #
+            # This is important: we want the states that the strategy
+            # actually entered during its backtest, not states reconstructed
+            # from today's signals.
+            #
+
+            states = pd.Series(
+                {
+                    simulation.context.current_date:
+                        simulation.strategy.new_state.name
+                    for simulation
+                    in comparison.backtest.simulations
+                }
+            )
+
+            #
+            # Use the exact asset mapping from this strategy's profile.
+            #
+            # This makes the same analyzer work for:
+            #
+            #   NASDAQ
+            #   NASDAQ 2-State
+            #   NASDAQ 2-State Cash
+            #   NASDAQ 2-State SQQQ
+            #   NASDAQ QQQ Moderate
+            #   S&P 500
+            #   Semiconductors
+            #
+
+            profile = comparison.profile
+
+            state_assets = {
+                "AGGRESSIVE": profile.aggressive_asset,
+                "MODERATE": profile.moderate_asset,
+                "DEFENSIVE": (
+                    profile.defensive_assets[0]
+                    if profile.defensive_assets
+                    else profile.cash_asset
+                ),
+            }
+
+            #
             # Generate transition-level analytics.
             #
 
             transitions = timing_analyzer.analyze(
-                comparison,
+                market,
+                states,
+                state_assets,
             )
 
             #
@@ -537,9 +590,7 @@ class Application:
 
             timing_path = timing_report.generate(
                 transitions,
-                output_path=(
-                    f"output/transition_timing_{safe_name}.csv"
-                ),
+                filename=f"transition_timing_{safe_name}.csv",
             )
 
             #
@@ -552,9 +603,7 @@ class Application:
 
             summary_path = timing_report.generate_summary(
                 summaries,
-                output_path=(
-                    f"output/transition_timing_summary_{safe_name}.csv"
-                ),
+                output_path=f"output/transition_timing_summary_{safe_name}.csv"
             )
 
             logger.info(
@@ -566,18 +615,6 @@ class Application:
                 "  Summary  : %s",
                 summary_path,
             )
-
-
-        summary = timing_analyzer.summarize(
-            transitions,
-        )
-
-        TransitionTimingReport().generate_summary(
-            summary,
-            output_path=(
-                f"output/transition_timing_summary_{safe_name}.csv"
-            ),
-        )
         
 
         logger.info("")
