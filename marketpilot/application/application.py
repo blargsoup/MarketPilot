@@ -357,9 +357,9 @@ class Application:
             detailed_checkpoint_path,
         )
 
-        #
-        # Signal / transition analytics
-        #
+        # ------------------------------------------------------------
+        # Signal analytics
+        # ------------------------------------------------------------
 
         signal_report = SignalReport()
 
@@ -379,12 +379,9 @@ class Application:
         )
 
         logger.info("")
-        logger.info(
-            "Signal analytics exported:"
-        )
+        logger.info("Signal analytics exported:")
 
         for name, path in signal_paths.items():
-
             logger.info(
                 "    %-24s %s",
                 name,
@@ -570,7 +567,11 @@ class Application:
             state_assets = {
                 "AGGRESSIVE": profile.aggressive_asset,
                 "MODERATE": profile.moderate_asset,
-                "DEFENSIVE": profile.cash_asset,
+                "DEFENSIVE": (
+                    profile.defensive_assets[0]
+                    if profile.defensive_assets
+                    else profile.cash_asset
+                ),
             }
 
             #
