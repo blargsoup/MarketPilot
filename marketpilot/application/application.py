@@ -50,20 +50,20 @@ from marketpilot.reports import SignalReport
 from marketpilot.reports.transition_timing import (
     TransitionTimingAnalyzer,
 )
-
 from marketpilot.reports.transition_timing_report import (
     TransitionTimingReport,
 )
 from marketpilot.reports.transition_analytics import (
     TransitionAnalytics,
 )
-
 from marketpilot.reports.transition_analytics_report import (
     TransitionAnalyticsReport,
 )
-
 from marketpilot.reports.period_performance import (
     PeriodPerformanceAnalyzer,
+)
+from marketpilot.reports.transition_opportunity_report import (
+    TransitionOpportunityReport,
 )
 
 
@@ -640,6 +640,10 @@ class Application:
             TransitionAnalyticsReport()
         )
 
+        transition_opportunity_report = (
+            TransitionOpportunityReport()
+        )
+
         period_performance = (
             PeriodPerformanceAnalyzer()
         )
@@ -821,6 +825,19 @@ class Application:
         )
 
         #
+        # Ranked transition opportunity diagnostics.
+        #
+
+        transition_opportunity_path = (
+            transition_opportunity_report.generate(
+                all_transition_details,
+                filename=(
+                    "transition_opportunities.csv"
+                ),
+            )
+        ) 
+
+        #
         # Period performance CSV.
         #
 
@@ -861,6 +878,10 @@ class Application:
         logger.info(
             "    %s",
             transition_analytics_detailed_path,
+        )
+        logger.info(
+            "    %s",
+            transition_opportunity_path,
         )
         logger.info(
             "    %s",
