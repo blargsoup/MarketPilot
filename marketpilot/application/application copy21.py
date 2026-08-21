@@ -50,20 +50,20 @@ from marketpilot.reports import SignalReport
 from marketpilot.reports.transition_timing import (
     TransitionTimingAnalyzer,
 )
-
 from marketpilot.reports.transition_timing_report import (
     TransitionTimingReport,
 )
 from marketpilot.reports.transition_analytics import (
     TransitionAnalytics,
 )
-
 from marketpilot.reports.transition_analytics_report import (
     TransitionAnalyticsReport,
 )
-
 from marketpilot.reports.period_performance import (
     PeriodPerformanceAnalyzer,
+)
+from marketpilot.reports.transition_opportunity_report import (
+    TransitionOpportunityReport,
 )
 
 
@@ -640,12 +640,17 @@ class Application:
             TransitionAnalyticsReport()
         )
 
+        transition_opportunity_report = (
+            TransitionOpportunityReport()
+        )
+
         period_performance = (
             PeriodPerformanceAnalyzer()
         )
 
         all_transition_aggregates = []
         all_period_performance = []
+        all_transition_details = []
 
         logger.info("")
         logger.info(
@@ -710,6 +715,14 @@ class Application:
                 )
             )
 
+            all_transition_details.append(
+                (
+                    name,
+                    transitions,
+                    comparison.profile,
+                )
+            )
+
             #
             # Full + historical-period transition aggregates.
             #
@@ -747,14 +760,20 @@ class Application:
 
                 logger.info(
                     "    %-12s "
-                    "Transitions=%4d "
+                    "States=%4d "
+                    "Trades=%4d "
                     "Whipsaws=%3d "
                     "Exit=%.2f%% "
                     "Re-entry=%.2f%% "
                     "Defensive=%.1fd",
                     aggregate.period,
-                    aggregate.transitions,
+
+                    aggregate.state_transitions,
+
+                    aggregate.trades,
+
                     aggregate.whipsaws,
+
                     (
                         aggregate.average_exit_timing
                         * 100
@@ -762,6 +781,7 @@ class Application:
                         is not None
                         else 0
                     ),
+
                     (
                         aggregate.average_reentry_timing
                         * 100
@@ -769,6 +789,7 @@ class Application:
                         is not None
                         else 0
                     ),
+
                     (
                         aggregate.average_defensive_duration
                         if aggregate.average_defensive_duration
@@ -787,6 +808,30 @@ class Application:
                 filename=(
                     "transition_analytics.csv"
                 ),
+            )
+        )
+
+        #
+        # Detailed transition analytics CSV.
+        #
+
+        transition_analytics_detailed_path = (
+            transition_analytics_report.generate_detailed(
+                all_transition_details,
+                filename=(
+                    "transition_analytics_detailed.csv"
+                ),
+            )
+        )
+
+        #
+        # Ranked transition opportunity diagnostics.
+        #
+
+        transition_opportunity_path = (
+            transition_opportunity_report.generate(
+                detailed_path=transition_analytics_detailed_path,
+                filename="transition_opportunities.csv",
             )
         )
 
@@ -827,6 +872,14 @@ class Application:
         logger.info(
             "    %s",
             transition_analytics_path,
+        )
+        logger.info(
+            "    %s",
+            transition_analytics_detailed_path,
+        )
+        logger.info(
+            "    %s",
+            transition_opportunity_path,
         )
         logger.info(
             "    %s",
