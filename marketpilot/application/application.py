@@ -830,12 +830,10 @@ class Application:
 
         transition_opportunity_path = (
             transition_opportunity_report.generate(
-                all_transition_details,
-                filename=(
-                    "transition_opportunities.csv"
-                ),
+                detailed_path=transition_analytics_detailed_path,
+                filename="transition_opportunities.csv",
             )
-        ) 
+        )
 
         #
         # Period performance CSV.
