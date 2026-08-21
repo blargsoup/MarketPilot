@@ -497,6 +497,20 @@ class TransitionOpportunityReport:
         working = df.copy()
 
         #
+        # The unique-event rankings are intended to analyze the
+        # NASDAQ signal system. Other strategy families remain
+        # available in the BY_STRATEGY sections below.
+        #
+
+        working = working[
+            working["Strategy"].astype(str).str.contains(
+                "NASDAQ",
+                case=False,
+                na=False,
+            )
+        ].copy()
+
+        #
         # Identify the best reference row for each event.
         #
 
@@ -659,9 +673,27 @@ class TransitionOpportunityReport:
         df,
         section_name,
     ):
-        """Add section label and sequential rank."""
+        """Add section label and clean sequential rank."""
 
         df = df.copy()
+
+        #
+        # Remove any existing ranking generated upstream.
+        #
+
+        if "Rank" in df.columns:
+            df = df.drop(
+                columns=["Rank"]
+            )
+
+        #
+        # Remove the internal priority field from the visible report.
+        #
+
+        if "_strategy_priority" in df.columns:
+            df = df.drop(
+                columns=["_strategy_priority"]
+            )
 
         df.insert(
             0,
